@@ -1,0 +1,16 @@
+[
+  { "name": "ledger", "title": "Ledger", "group": "Accounts", "mod_code": "RLLDG", "filter": "ledger", "info": "Entries of one account with a running balance" },
+  { "name": "daybook", "title": "Daybook", "group": "Accounts", "mod_code": "RADAY", "filter": "range", "info": "Every document in date order" },
+  { "name": "trial_balance", "title": "Trial Balance", "group": "Accounts", "mod_code": "RATBL", "filter": "range", "info": "Opening, movement and closing of every account" },
+  { "name": "profit_loss", "title": "Profit & Loss", "group": "Accounts", "mod_code": "RAPAL", "filter": "range", "info": "Gross profit and net profit of the period" },
+  { "name": "balance_sheet", "title": "Balance Sheet", "group": "Accounts", "mod_code": "RABAS", "filter": "as_on", "info": "Assets and liabilities on a date" },
+  { "name": "sales_register", "title": "Sales Register", "group": "Sales and purchases", "mod_code": "RTSAR", "filter": "range", "info": "Invoices and credit notes with tax" },
+  { "name": "purchase_register", "title": "Purchase Register", "group": "Sales and purchases", "mod_code": "RTPUR", "filter": "range", "info": "Bills and supplier notes with tax" },
+  { "name": "outstanding", "title": "Outstanding & Aging", "group": "Sales and purchases", "mod_code": "RTOSR", "filter": "outstanding", "info": "Pending receivables / payables with aging" },
+  { "name": "item_sales", "title": "Item Sales / Purchases", "group": "Inventory", "mod_code": "RIITS", "filter": "item_side", "info": "Quantity and value per item" },
+  { "name": "stock_summary", "title": "Stock Summary", "group": "Inventory", "mod_code": "RSSTS", "filter": "as_on", "info": "Quantity and value of the stock" },
+  { "name": "stock_ledger", "title": "Stock Ledger", "group": "Inventory", "mod_code": "RSSTL", "filter": "stock_ledger", "info": "Movement of one item" },
+  { "name": "gst_summary", "title": "GST Summary", "group": "Tax", "mod_code": "RRGS1", "filter": "range", "info": "Output tax, input tax and the net payable" },
+  { "name": "gstr1", "title": "GSTR-1", "group": "Tax", "mod_code": "RRGS1", "filter": "month", "info": "Outward supplies of a month, with the JSON file for the GST portal" },
+  { "name": "gstr3b", "title": "GSTR-3B", "group": "Tax", "mod_code": "RRGS3", "filter": "month", "info": "Monthly summary return, with the JSON file for the GST portal" }
+]

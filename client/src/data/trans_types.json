@@ -1,0 +1,18 @@
+[
+  { "key": "sales-quote", "type": "SE", "title": "Quote", "plural": "Quotes", "side": "S", "kind": "items", "mod_code": "SASAQ", "convert_to": ["SO", "SI"] },
+  { "key": "sales-order", "type": "SO", "title": "Sales Order", "plural": "Sales Orders", "side": "S", "kind": "items", "mod_code": "SASAO", "convert_to": ["SH", "SI"] },
+  { "key": "delivery-challan", "type": "SH", "title": "Delivery Challan", "plural": "Delivery Challans", "side": "S", "kind": "items", "mod_code": "SASDH", "convert_to": ["SI"] },
+  { "key": "sales-invoice", "type": "SI", "title": "Invoice", "plural": "Sales Invoices", "side": "S", "kind": "items", "mod_code": "SASAI", "convert_to": ["SC", "SD"] },
+  { "key": "sales-credit-note", "type": "SC", "title": "Credit Note", "plural": "Sales Credit Notes", "side": "S", "kind": "items", "mod_code": "SASAC", "convert_to": [] },
+  { "key": "sales-debit-note", "type": "SD", "title": "Debit Note", "plural": "Sales Debit Notes", "side": "S", "kind": "items", "mod_code": "SASAD", "convert_to": [] },
+  { "key": "receipt", "type": "SP", "title": "Receipt", "plural": "Receipts", "side": "S", "kind": "receipt", "mod_code": "SASAR", "convert_to": [] },
+  { "key": "purchase-quote", "type": "PQ", "title": "Purchase Quote", "plural": "Purchase Quotes", "side": "P", "kind": "items", "mod_code": "PUPUQ", "convert_to": ["PO", "PI"] },
+  { "key": "purchase-order", "type": "PO", "title": "Purchase Order", "plural": "Purchase Orders", "side": "P", "kind": "items", "mod_code": "PUPUO", "convert_to": ["GR", "PI"] },
+  { "key": "goods-receipt", "type": "GR", "title": "Goods Receipt", "plural": "Goods Receipts", "side": "P", "kind": "items", "mod_code": "PUPUG", "convert_to": ["PI"] },
+  { "key": "purchase-bill", "type": "PI", "title": "Purchase Bill", "plural": "Purchase Bills", "side": "P", "kind": "items", "mod_code": "PUPUB", "convert_to": ["PC", "PD"] },
+  { "key": "purchase-credit-note", "type": "PC", "title": "Supplier Credit Note", "plural": "Supplier Credit Notes", "side": "P", "kind": "items", "mod_code": "PUPUC", "convert_to": [] },
+  { "key": "purchase-debit-note", "type": "PD", "title": "Supplier Debit Note", "plural": "Supplier Debit Notes", "side": "P", "kind": "items", "mod_code": "PUPUD", "convert_to": [] },
+  { "key": "payment", "type": "PP", "title": "Payment", "plural": "Payments", "side": "P", "kind": "receipt", "mod_code": "PUPUP", "convert_to": [] },
+  { "key": "journal", "type": "J", "title": "Journal", "plural": "Journal Entries", "side": "A", "kind": "journal", "mod_code": "ACJRL", "convert_to": [] },
+  { "key": "contra", "type": "JC", "title": "Contra", "plural": "Cash Contra", "side": "A", "kind": "journal", "mod_code": "ACCCT", "convert_to": [] }
+]

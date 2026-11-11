@@ -1,0 +1,148 @@
+:root {
+  --ob-sidebar-width: 240px;
+  --ob-primary: #0d6efd;
+  --ob-dark: #1f2937;
+}
+
+body {
+  background: #f4f6fa;
+  font-size: 0.92rem;
+}
+
+/* Layout */
+.ob-sidebar {
+  width: var(--ob-sidebar-width);
+  min-height: 100vh;
+  background: var(--ob-dark);
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  overflow-y: auto;
+  z-index: 1030;
+}
+
+.ob-sidebar .brand {
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.25rem;
+  padding: 1rem 1.25rem;
+  display: block;
+  text-decoration: none;
+}
+
+.ob-sidebar .nav-section {
+  color: #9ca3af;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  padding: 0.9rem 1.25rem 0.3rem;
+}
+
+.ob-sidebar .nav-link {
+  color: #d1d5db;
+  padding: 0.4rem 1.25rem;
+  border-radius: 0;
+}
+
+.ob-sidebar .nav-link:hover,
+.ob-sidebar .nav-link.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.ob-sidebar .nav-link i {
+  margin-right: 0.55rem;
+}
+
+.ob-main {
+  margin-left: var(--ob-sidebar-width);
+  min-height: 100vh;
+}
+
+.ob-topbar {
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0.6rem 1.5rem;
+}
+
+.ob-content {
+  padding: 1.5rem;
+}
+
+@media (max-width: 991px) {
+  .ob-sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.2s;
+  }
+  .ob-sidebar.open {
+    transform: translateX(0);
+  }
+  .ob-main {
+    margin-left: 0;
+  }
+}
+
+/* Cards and tables */
+.ob-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+}
+
+.ob-stat .label {
+  color: #6b7280;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.ob-stat .value {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.table-ob th {
+  background: #f9fafb;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.text-end-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.auth-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0d6efd 0%, #1f2937 100%);
+  padding: 1rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+}
+
+/* Print view of an invoice */
+@media print {
+  .ob-sidebar,
+  .ob-topbar,
+  .no-print {
+    display: none !important;
+  }
+  .ob-main {
+    margin-left: 0;
+  }
+  .ob-content {
+    padding: 0;
+  }
+  body {
+    background: #fff;
+  }
+}
