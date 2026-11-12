@@ -18,6 +18,9 @@ router.post('/', async (req, res) => {
         if (req.body.is_active !== undefined) {
             query_parameter.is_active = !!req.body.is_active;
         }
+        if (req.body.tag) {
+            query_parameter.tags = String(req.body.tag).trim().toLowerCase();
+        }
         if (search) {
             let search_regex = { $regex: UTILS.escapeRegex(search), $options: "i" };
             query_parameter.$or = [{ name: search_regex }, { company: search_regex }, { phone: search_regex }, { email: search_regex }];

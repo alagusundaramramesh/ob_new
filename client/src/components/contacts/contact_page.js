@@ -8,7 +8,7 @@ import Modal from "../modal";
 
 const EMPTY_CONTACT = {
 	con_id: 0, name: "", company: "", email: "", phone: "", contact_person: "", tax_no: "", state_code: "33",
-	credit_days: 0, discount: 0, tds: 0, opening_balance: 0, price_list_id: 0, reminders_off: false, is_active: true,
+	credit_days: 0, discount: 0, tds: 0, opening_balance: 0, price_list_id: 0, gst_treatment: "REG", credit_limit: 0, credit_block: true, tags: [], reminders_off: false, is_active: true,
 };
 
 /* Customers (cs_type C) and suppliers (cs_type S) use the same screen */
@@ -61,7 +61,8 @@ const ContactPage = ({ csType }) => {
 
 	async function handleSave(e) {
 		e.preventDefault();
-		const result = await saveContact({ ...editing, cs_type: csType, price_list_id: parseInt(editing.price_list_id) || 0 });
+		const tags = (editing.tags_text !== undefined ? editing.tags_text : (editing.tags || []).join(",")).split(",").map((tag) => tag.trim()).filter((tag) => tag);
+		const result = await saveContact({ ...editing, cs_type: csType, price_list_id: parseInt(editing.price_list_id) || 0, tags });
 		if (result.status !== "S") {
 			toast.error(result.message || "Unable to save");
 			return;
@@ -140,6 +141,15 @@ const ContactPage = ({ csType }) => {
 							<div className="col-md-6"><label className="form-label">Phone</label><input className="form-control" name="phone" value={editing.phone || ""} onChange={handleChange} /></div>
 							<div className="col-md-6"><label className="form-label">GSTIN</label><input className="form-control" name="tax_no" value={editing.tax_no || ""} onChange={handleChange} maxLength={15} /></div>
 							<div className="col-md-6">
+								<label className="form-label">GST treatment</label>
+								<select className="form-select" name="gst_treatment" value={editing.gst_treatment || "REG"} onChange={handleChange}>
+									<option value="REG">Regular</option>
+									{csType === "C" && <option value="SEZ">SEZ unit / developer</option>}
+									{csType === "C" && <option value="EXPORT">Overseas customer (export)</option>}
+									{csType === "S" && <option value="COMP">Composition dealer (no tax on bills)</option>}
+								</select>
+							</div>
+							<div className="col-md-6">
 								<label className="form-label">State (place of supply)</label>
 								<select className="form-select" name="state_code" value={editing.state_code || ""} onChange={handleChange}>
 									<option value="">-</option>
@@ -163,6 +173,13 @@ const ContactPage = ({ csType }) => {
 									{priceLists.map((priceList) => <option key={priceList.price_list_id} value={priceList.price_list_id}>{priceList.name}</option>)}
 								</select>
 							</div>
+							<div className="col-md-6"><label className="form-label">Tags</label><input className="form-control" placeholder="wholesale, north" value={editing.tags_text !== undefined ? editing.tags_text : (editing.tags || []).join(", ")} onChange={(e) => setEditing({ ...editing, tags_text: e.target.value })} /><div className="form-text">Separate with commas. Up to 10 tags.</div></div>
+							{csType === "C" && (
+								<>
+									<div className="col-md-3"><label className="form-label">Credit limit</label><input type="number" min="0" step="0.01" className="form-control" name="credit_limit" value={editing.credit_limit || 0} onChange={handleChange} /><div className="form-text">0 = no limit</div></div>
+									<div className="col-md-3 d-flex align-items-center"><div className="form-check"><input className="form-check-input" type="checkbox" id="credit_block" name="credit_block" checked={editing.credit_block !== false} onChange={handleChange} /><label className="form-check-label" htmlFor="credit_block">Refuse sales above the limit</label></div></div>
+								</>
+							)}
 							{csType === "C" && (
 								<div className="col-md-6 d-flex align-items-end">
 									<div className="form-check">

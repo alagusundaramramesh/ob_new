@@ -8,9 +8,12 @@
   { "name": "purchase_register", "title": "Purchase Register", "group": "Sales and purchases", "mod_code": "RTPUR", "filter": "range", "info": "Bills and supplier notes with tax" },
   { "name": "outstanding", "title": "Outstanding & Aging", "group": "Sales and purchases", "mod_code": "RTOSR", "filter": "outstanding", "info": "Pending receivables / payables with aging" },
   { "name": "item_sales", "title": "Item Sales / Purchases", "group": "Inventory", "mod_code": "RIITS", "filter": "item_side", "info": "Quantity and value per item" },
-  { "name": "stock_summary", "title": "Stock Summary", "group": "Inventory", "mod_code": "RSSTS", "filter": "as_on", "info": "Quantity and value of the stock" },
+  { "name": "stock_summary", "title": "Stock Summary", "group": "Inventory", "mod_code": "RSSTS", "filter": "stock_value", "info": "Quantity and value of the stock (master rate, FIFO or average cost)" },
   { "name": "stock_ledger", "title": "Stock Ledger", "group": "Inventory", "mod_code": "RSSTL", "filter": "stock_ledger", "info": "Movement of one item" },
   { "name": "gst_summary", "title": "GST Summary", "group": "Tax", "mod_code": "RRGS1", "filter": "range", "info": "Output tax, input tax and the net payable" },
   { "name": "gstr1", "title": "GSTR-1", "group": "Tax", "mod_code": "RRGS1", "filter": "month", "info": "Outward supplies of a month, with the JSON file for the GST portal" },
-  { "name": "gstr3b", "title": "GSTR-3B", "group": "Tax", "mod_code": "RRGS3", "filter": "month", "info": "Monthly summary return, with the JSON file for the GST portal" }
+  { "name": "gstr3b", "title": "GSTR-3B", "group": "Tax", "mod_code": "RRGS3", "filter": "month", "info": "Monthly summary return, with the JSON file for the GST portal" },
+  { "name": "gstr2b", "title": "GSTR-2B reconciliation", "group": "Tax", "mod_code": "RRGS3", "filter": "gstr2b", "info": "Match your purchases with the GSTR-2B file downloaded from the GST portal" },
+  { "name": "gstr9", "title": "GSTR-9 annual figures", "group": "Tax", "mod_code": "RRGS3", "filter": "year", "info": "Twelve months of GSTR-1 and GSTR-3B added up, in the tables of the annual return" },
+  { "name": "gstr4", "title": "GSTR-4 / CMP-08 (composition)", "group": "Tax", "mod_code": "RRGS3", "filter": "year", "info": "Quarterly turnover and composition tax for companies under the composition scheme" }
 ]

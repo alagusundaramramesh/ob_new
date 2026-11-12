@@ -234,6 +234,22 @@ class EinvoiceTaxpro {
         if (!response.vehUpdDate && response.Status !== 1) this.fail(response, 'E-way bill');
         return { vehicle_updated_on: this.portalDate(response.vehUpdDate), valid_till: this.portalDate(response.validUpto) || request.valid_till };
     }
+
+    /* NIC action EXTENDVALIDITY (written from the NIC API description, not yet tried on the sandbox) */
+    async extendValidity(context, request) {
+        let hosts = this.getHosts(context.mode);
+        let response = await this.call(context, 'POST', `${hosts.action}?action=EXTENDVALIDITY`, request.body);
+        if (!response.validUpto && response.Status !== 1) this.fail(response, 'E-way bill');
+        return { updated_on: this.portalDate(response.updatedDate), valid_till: this.portalDate(response.validUpto) || request.valid_till };
+    }
+
+    /* NIC action UPDATETRANSPORTER (written from the NIC API description, not yet tried on the sandbox) */
+    async updateTransporter(context, request) {
+        let hosts = this.getHosts(context.mode);
+        let response = await this.call(context, 'POST', `${hosts.action}?action=UPDATETRANSPORTER`, request.body);
+        if (!response.transporterId && response.Status !== 1) this.fail(response, 'E-way bill');
+        return { updated_on: this.portalDate(response.transUpdateDate), transporter_id: response.transporterId || request.body.transporterId };
+    }
 }
 
 module.exports = new EinvoiceTaxpro();

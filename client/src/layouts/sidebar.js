@@ -40,9 +40,17 @@ const MENU = [
 		],
 	},
 	{
+		title: "Office Inventory",
+		links: [
+			{ to: "/office-assets", icon: "pc-display", label: "Office Assets", mod_code: "OIAST" },
+			{ to: "/office-assignments", icon: "person-lines-fill", label: "Assignments", mod_code: "OIASG" },
+		],
+	},
+	{
 		title: "Accounting",
 		links: [
 			{ to: "/accounts", icon: "journal-text", label: "Chart of Accounts", mod_code: "ACCHA" },
+			{ to: "/opening-balances", icon: "box-arrow-in-right", label: "Opening Balances", mod_code: "ACCHA" },
 			{ to: "/recurring", icon: "arrow-repeat", label: "Recurring Invoices", mod_code: "REC" },
 			{ to: "/t/journal", icon: "journal-plus", label: "Journal Entries", mod_code: "ACJRL" },
 			{ to: "/t/contra", icon: "arrow-left-right", label: "Cash Contra", mod_code: "ACCCT" },

@@ -15,6 +15,7 @@ const EWB_MIN_VALUE = 50000;
 
 // Both portals allow a cancel only within 24 hours
 const CANCEL_WINDOW_HOURS = 24;
+const EXTEND_WINDOW_HOURS = 8;
 
 const VEHICLE_PATTERN = /^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}$/;
 
@@ -409,6 +410,85 @@ class Einvoice {
             $push: { 'ewb.vehicle_history': { vehicle_no, from_place: body.fromPlace, reason_code: body.reasonCode, updated_on: new Date(), updated_by: user_email } }
         });
         await this.log(dbobj, company, trans_id, 'update_vehicle', context, null);
+        return result;
+    }
+
+    /*
+     * Extend the validity of an e-way bill (goods still on the way). The portal allows it from 8 hours before the bill ends until 8 hours after.
+     * input: vehicle_no, from_place, from_state, from_pincode, remaining_distance, reason_code (1 natural calamity, 2 law and order,
+     * 3 transshipment, 4 accident, 5 other), reason_remark, consignment_status (M in movement, T in transit)
+     */
+    async extendEwb(dbobj, company, trans_id, input, user_email) {
+        let context = await this.getContext(dbobj, company);
+        let { transaction } = await this.loadDocument(dbobj, company.c_id, trans_id);
+        if (!transaction.ewb || transaction.ewb.status !== 'ACT') {
+            throw new BusinessError('This document has no active e-way bill', 'EWB_NOT_ACTIVE');
+        }
+        let hours_to_expiry = (new Date(String(transaction.ewb.valid_till).replace(' ', 'T') + 'Z').getTime() - Date.now()) / 3600000;
+        if (hours_to_expiry > EXTEND_WINDOW_HOURS || hours_to_expiry < -EXTEND_WINDOW_HOURS) {
+            throw new BusinessError(`The validity can be extended only from ${EXTEND_WINDOW_HOURS} hours before it ends until ${EXTEND_WINDOW_HOURS} hours after (valid till ${transaction.ewb.valid_till})`, 'EXTEND_WINDOW');
+        }
+        let vehicle_no = String(input.vehicle_no || transaction.ewb.vehicle_no || '').replace(/[\s-]/g, '').toUpperCase();
+        if (String(transaction.ewb.trans_mode) === '1' && !VEHICLE_PATTERN.test(vehicle_no)) {
+            throw new BusinessError('The vehicle number looks wrong. Example: TN09AB1234', 'VEHICLE_INVALID');
+        }
+        if (![1, 2, 3, 4, 5].includes(Number(input.reason_code))) {
+            throw new BusinessError('Choose a reason: 1 natural calamity, 2 law and order, 3 transshipment, 4 accident, 5 other', 'REASON_REQUIRED');
+        }
+        if (String(input.from_place || '').trim().length < 2 || !/^[0-9]{2}$/.test(String(input.from_state || '')) || !/^[1-9][0-9]{5}$/.test(String(input.from_pincode || ''))) {
+            throw new BusinessError('Enter the place, the 2 digit state code and the 6 digit PIN code where the goods are now', 'PLACE_REQUIRED');
+        }
+        let remaining_distance = parseInt(input.remaining_distance);
+        if (!(remaining_distance > 0 && remaining_distance <= 4000)) {
+            throw new BusinessError('Enter the distance still to travel in km (1 to 4000)', 'DISTANCE_INVALID');
+        }
+        let body = {
+            ewbNo: Number(transaction.ewb.ewb_no), vehicleNo: vehicle_no, fromPlace: String(input.from_place).trim(), fromState: Number(input.from_state),
+            fromPincode: Number(input.from_pincode), remainingDistance: remaining_distance, transMode: String(transaction.ewb.trans_mode),
+            extnRsnCode: Number(input.reason_code), extnRemarks: String(input.reason_remark || '').slice(0, 50),
+            consignmentStatus: input.consignment_status === 'T' ? 'T' : 'M', transDocNo: transaction.ewb.trans_doc_no || ''
+        };
+        let result;
+        try {
+            result = await context.provider.extendValidity(context, { body: body, valid_till: transaction.ewb.valid_till });
+        } catch (error) {
+            await this.log(dbobj, company, trans_id, 'extend_ewb', context, error);
+            throw error;
+        }
+        await dbobj.collection('ob_transactions').updateOne({ c_id: company.c_id, trans_id: trans_id }, {
+            $set: { 'ewb.valid_till': result.valid_till },
+            $push: { 'ewb.extend_history': { old_valid_till: transaction.ewb.valid_till, new_valid_till: result.valid_till, from_place: body.fromPlace, reason_code: body.extnRsnCode, updated_on: new Date(), updated_by: user_email } }
+        });
+        await this.log(dbobj, company, trans_id, 'extend_ewb', context, null);
+        return result;
+    }
+
+    /* Part B update: hand the e-way bill to another transporter (the GSTIN is the transporter id of the portal) */
+    async updateTransporter(dbobj, company, trans_id, input, user_email) {
+        let context = await this.getContext(dbobj, company);
+        let { transaction } = await this.loadDocument(dbobj, company.c_id, trans_id);
+        if (!transaction.ewb || transaction.ewb.status !== 'ACT') {
+            throw new BusinessError('This document has no active e-way bill', 'EWB_NOT_ACTIVE');
+        }
+        let transporter_gstin = String(input.transporter_gstin || '').trim().toUpperCase();
+        if (!FORMATTER.isValidGstin(transporter_gstin)) {
+            throw new BusinessError('Enter the GSTIN of the transporter', 'TRANSPORTER_INVALID');
+        }
+        if (transporter_gstin === transaction.ewb.transporter_gstin) {
+            throw new BusinessError('This transporter is already on the e-way bill', 'TRANSPORTER_SAME');
+        }
+        let result;
+        try {
+            result = await context.provider.updateTransporter(context, { body: { ewbNo: Number(transaction.ewb.ewb_no), transporterId: transporter_gstin } });
+        } catch (error) {
+            await this.log(dbobj, company, trans_id, 'update_transporter', context, error);
+            throw error;
+        }
+        await dbobj.collection('ob_transactions').updateOne({ c_id: company.c_id, trans_id: trans_id }, {
+            $set: { 'ewb.transporter_gstin': transporter_gstin, 'ewb.transporter_name': String(input.transporter_name || '').slice(0, 100) },
+            $push: { 'ewb.transporter_history': { old_gstin: transaction.ewb.transporter_gstin || '', new_gstin: transporter_gstin, updated_on: new Date(), updated_by: user_email } }
+        });
+        await this.log(dbobj, company, trans_id, 'update_transporter', context, null);
         return result;
     }
 }

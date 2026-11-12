@@ -116,7 +116,13 @@ const TransactionView = () => {
 						<div className="text-muted small text-uppercase">{transType.side === "S" ? "Bill to" : "Supplier"}</div>
 						<div className="fw-bold">{transaction.con_name || "Cash"}</div>
 						{transaction.con_tax_no && <div className="small">GSTIN: {transaction.con_tax_no}</div>}
-						{transaction.dst_state_code && <div className="small">Place of supply: {(STATES.find((state) => state.code === transaction.dst_state_code) || {}).name || transaction.dst_state_code}</div>}
+						{transaction.dst_state_code && <div className="small">Place of supply: {(STATES.find((state) => state.code === transaction.dst_state_code) || {}).name || (transaction.dst_state_code === "96" ? "Other countries (export)" : transaction.dst_state_code)}</div>}
+						<div className="mt-1">
+							{transaction.gst_treatment === "SEZ" && <span className="badge text-bg-info me-1">SEZ</span>}
+							{transaction.gst_treatment === "EXPORT" && <span className="badge text-bg-info me-1">Export</span>}
+							{transaction.zero_rated && <span className="badge text-bg-warning me-1">Without payment of tax</span>}
+							{transaction.reverse_charge && <span className="badge text-bg-warning me-1">Reverse charge</span>}
+						</div>
 					</div>
 				)}
 

@@ -38,11 +38,13 @@ const ReportView = () => {
 
 	const today = toInputDate();
 	const [filters, setFilters] = useState({
-		from_date: "", to_date: today, as_on_date: today, month: today.slice(0, 7), acc_id: searchParams.get("acc_id") || "", item_id: "", side: "R",
+		from_date: "", to_date: today, as_on_date: today, month: today.slice(0, 7), method: "MASTER", year: Number(today.slice(5, 7)) >= 4 ? Number(today.slice(0, 4)) : Number(today.slice(0, 4)) - 1, acc_id: searchParams.get("acc_id") || "", item_id: "", side: "R",
 	});
 	const [options, setOptions] = useState({ accounts: [], items: [] });
 	const [data, setData] = useState(null);
 	const [loading, setLoading] = useState(false);
+	const [gstr2bFile, setGstr2bFile] = useState(null);
+	const [statusFilter, setStatusFilter] = useState("ALL");
 
 	// Report names change inside this component, so the old result is cleared
 	useEffect(() => {
@@ -62,7 +64,7 @@ const ReportView = () => {
 			}
 		}
 		loadOptions();
-		if (!["ledger", "stock_ledger", "month"].includes(report.filter)) {
+		if (!["ledger", "stock_ledger", "month", "gstr2b"].includes(report.filter)) {
 			runReport();
 		} else if (searchParams.get("acc_id")) {
 			runReport();
@@ -76,8 +78,17 @@ const ReportView = () => {
 			if (filters.from_date) request.from_date = filters.from_date;
 			request.to_date = filters.to_date;
 		}
-		if (report.filter === "as_on" || report.filter === "outstanding") request.as_on_date = filters.as_on_date;
-		if (report.filter === "month") request.month = filters.month;
+		if (report.filter === "as_on" || report.filter === "outstanding" || report.filter === "stock_value") request.as_on_date = filters.as_on_date;
+		if (report.filter === "stock_value") request.method = filters.method;
+		if (report.filter === "month" || report.filter === "gstr2b") request.month = filters.month;
+		if (report.filter === "gstr2b") {
+			if (!gstr2bFile) {
+				toast.error("Choose the GSTR-2B JSON file");
+				return;
+			}
+			request.gstr2b = gstr2bFile;
+		}
+		if (report.filter === "year") request.year = Number(filters.year);
 		if (report.filter === "ledger") request.acc_id = Number(filters.acc_id);
 		if (report.filter === "stock_ledger") request.item_id = Number(filters.item_id);
 		if (report.filter === "outstanding") request.side = filters.side;
@@ -242,6 +253,12 @@ const ReportView = () => {
 				return renderGstr1();
 			case "gstr3b":
 				return renderGstr3b();
+			case "gstr2b":
+				return renderGstr2b();
+			case "gstr9":
+				return renderGstr9();
+			case "gstr4":
+				return renderGstr4();
 			default:
 				return null;
 		}
@@ -272,8 +289,11 @@ const ReportView = () => {
 			{ label: "7  B2C small (by state and rate, credit notes subtracted)", count: summary.b2cs.documents, value: summary.b2cs.txval },
 			{ label: "9B  Credit / debit notes (registered)", count: summary.cdnr.count, value: null },
 			{ label: "9B  Credit / debit notes (unregistered)", count: summary.cdnur.count, value: null },
+			{ label: "6A  Exports", count: summary.exp.count, value: summary.exp.txval },
+			{ label: "4A  of the B2B invoices: supplies to SEZ", count: summary.sez.count, value: summary.sez.txval },
 			{ label: "8  Nil rated supplies", count: null, value: summary.nil.amount },
 			{ label: "12  HSN summary lines", count: summary.hsn_lines, value: null },
+			{ label: "13  Documents issued (number series)", count: summary.doc_issue.series, value: null },
 		];
 		return (
 			<>
@@ -299,6 +319,135 @@ const ReportView = () => {
 		);
 	};
 
+	/* The file from the GST portal is read in the browser and sent as JSON */
+	const chooseGstr2bFile = (e) => {
+		const file = e.target.files[0];
+		setGstr2bFile(null);
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = () => {
+			try {
+				setGstr2bFile(JSON.parse(reader.result));
+			} catch (error) {
+				toast.error("This file is not a valid JSON file");
+			}
+		};
+		reader.readAsText(file);
+	};
+
+	const renderGstr2b = () => {
+		const summary = data.summary;
+		const statusLabels = {
+			MATCHED: ["Matched", "success"], MISMATCH: ["Amount differs", "danger"], PROBABLE: ["Number differs", "warning"],
+			NOT_IN_BOOKS: ["Only in portal", "primary"], NOT_IN_PORTAL: ["Only in books", "secondary"],
+		};
+		const cards = [
+			["MATCHED", summary.matched], ["MISMATCH", summary.mismatch], ["PROBABLE", summary.probable],
+			["NOT_IN_BOOKS", summary.not_in_books], ["NOT_IN_PORTAL", summary.not_in_portal],
+		];
+		const visibleRows = data.rows.filter((row) => statusFilter === "ALL" || row.status === statusFilter);
+		const differenceText = (row) => Object.entries(row.differences).map(([head, value]) => `${head === "txval" ? "Taxable" : head.replace("amt", "").toUpperCase()} ${value > 0 ? "+" : ""}${value}`).join(", ");
+		const itcRow = (label, itc) => ({ label, iamt: itc.iamt, camt: itc.camt, samt: itc.samt, csamt: itc.csamt, total: itc.total });
+		return (
+			<>
+				<div className="mb-3">Return period <strong>{data.period}</strong> - books read from <strong>{formatDate(data.books_from)}</strong></div>
+				{data.warnings.length > 0 && <div className="alert alert-warning small"><ul className="mb-0">{data.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
+				<div className="d-flex flex-wrap gap-2 mb-3">
+					<button type="button" className={`btn btn-sm ${statusFilter === "ALL" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setStatusFilter("ALL")}>All ({data.rows.length})</button>
+					{cards.map(([status, count]) => (
+						<button type="button" key={status} className={`btn btn-sm ${statusFilter === status ? `btn-${statusLabels[status][1]}` : `btn-outline-${statusLabels[status][1]}`}`} onClick={() => setStatusFilter(status)}>
+							{statusLabels[status][0]} ({count})
+						</button>
+					))}
+				</div>
+				<DataTable
+					columns={[
+						{ label: "Status", render: (row) => <span className={`badge text-bg-${statusLabels[row.status][1]}`}>{statusLabels[row.status][0]}</span> },
+						{ label: "Supplier", render: (row) => (row.portal || row.book).supplier },
+						{ label: "GSTIN", render: (row) => (row.portal || row.book).ctin || "-" },
+						{ label: "Portal document", render: (row) => (row.portal ? `${row.portal.doc_no} (${row.portal.kind})` : "") },
+						{ label: "Books document", render: (row) => (row.book ? `${row.book.doc_no} (${row.book.trans_no})` : "") },
+						{ label: "Portal tax", num: true, render: (row) => (row.portal ? formatMoney(row.portal.iamt + row.portal.camt + row.portal.samt + row.portal.csamt) : "") },
+						{ label: "Books tax", num: true, render: (row) => (row.book ? formatMoney(row.book.iamt + row.book.camt + row.book.samt + row.book.csamt) : "") },
+						{ label: "Difference", render: differenceText },
+					]}
+					rows={visibleRows}
+				/>
+				<div className="fw-bold mt-4 mb-1">Input tax credit</div>
+				<DataTable
+					columns={[{ label: "", field: "label" }, { label: "IGST", num: true, render: money("iamt") }, { label: "CGST", num: true, render: money("camt") }, { label: "SGST", num: true, render: money("samt") }, { label: "Cess", num: true, render: money("csamt") }, { label: "Total", num: true, render: money("total") }]}
+					rows={[
+						itcRow("As in the GST portal (GSTR-2B)", summary.itc_portal),
+						itcRow("As in your books", summary.itc_books),
+						itcRow("Books documents found in the portal", summary.itc_matched_books),
+					]}
+				/>
+				<div className="form-text mt-2">
+					Claim the credit only for documents found in the portal. "Only in books" means the supplier has not filed it (or it is dated in another month). Credit and debit notes from suppliers are both matched with credit notes of the portal.
+				</div>
+			</>
+		);
+	};
+
+	const renderGstr9 = () => {
+		// Object keys such as "5" and "9" would come first, so the order of the annual return is given here
+		const tableOrder = ["4A", "4B", "4C", "4D", "4I_4J", "5", "6", "6_rcm", "9", "9_output", "9_zero_rated"];
+		const tableRows = tableOrder.filter((table) => data.tables[table]).map((table) => ({ table: table.replace("_", " "), ...data.tables[table] }));
+		return (
+			<>
+				<div className="mb-3">GSTIN <strong>{data.gstin}</strong> - financial year <strong>{data.fy}</strong></div>
+				<div className="alert alert-warning small"><ul className="mb-0">{data.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>
+				<DataTable
+					columns={[
+						{ label: "Table", field: "table" }, { label: "Details", field: "text" },
+						{ label: "Taxable value", num: true, render: (row) => (row.txval === undefined ? "" : formatMoney(row.txval)) },
+						{ label: "IGST", num: true, render: (row) => (row.iamt === undefined ? "" : formatMoney(row.iamt)) },
+						{ label: "CGST", num: true, render: (row) => (row.camt === undefined ? "" : formatMoney(row.camt)) },
+						{ label: "SGST", num: true, render: (row) => (row.samt === undefined ? "" : formatMoney(row.samt)) },
+						{ label: "Cess", num: true, render: (row) => (row.csamt === undefined ? "" : formatMoney(row.csamt)) },
+					]}
+					rows={tableRows}
+				/>
+				<div className="fw-bold mt-4 mb-1">Month by month</div>
+				<DataTable
+					columns={[
+						{ label: "Month", field: "month" }, { label: "Documents", num: true, field: "documents" },
+						{ label: "Outward taxable (B2B + B2C)", num: true, render: (row) => formatMoney(row.b2b_txval + row.b2c_txval) },
+						{ label: "Output tax", num: true, render: (row) => formatMoney(row.output.iamt + row.output.camt + row.output.samt + row.output.csamt) },
+						{ label: "Input credit", num: true, render: (row) => formatMoney(row.itc.iamt + row.itc.camt + row.itc.samt + row.itc.csamt) },
+						{ label: "Tax payable", num: true, render: (row) => formatMoney(row.payable.iamt + row.payable.camt + row.payable.samt + row.payable.csamt) },
+					]}
+					rows={data.months}
+				/>
+			</>
+		);
+	};
+
+	const renderGstr4 = () => (
+		<>
+			<div className="mb-3">GSTIN <strong>{data.gstin}</strong> - financial year <strong>{data.fy}</strong> - composition rate <strong>{data.rate}%</strong></div>
+			<div className="alert alert-warning small"><ul className="mb-0">{data.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>
+			<DataTable
+				columns={[
+					{ label: "Quarter", render: (row) => "Q" + row.quarter }, { label: "Turnover", num: true, render: money("turnover") },
+					{ label: "Tax", num: true, render: money("tax") }, { label: "CGST", num: true, render: money("cgst") }, { label: "SGST", num: true, render: money("sgst") },
+				]}
+				rows={data.quarters}
+				footer={<tr className="fw-bold"><td>Year</td><td className="text-end-num">{formatMoney(data.totals.turnover)}</td><td className="text-end-num">{formatMoney(data.totals.tax)}</td><td className="text-end-num">{formatMoney(data.totals.cgst)}</td><td className="text-end-num">{formatMoney(data.totals.sgst)}</td></tr>}
+			/>
+			<div className="fw-bold mt-4 mb-1">Inward supplies of the year</div>
+			<DataTable
+				columns={[{ label: "From", field: "label" }, { label: "Value", num: true, render: money("value") }]}
+				rows={[
+					{ label: "Registered suppliers", value: data.inward.registered },
+					{ label: "Unregistered suppliers", value: data.inward.unregistered },
+					{ label: "Reverse charge purchases (taxable value)", value: data.inward.reverse_charge_txval },
+					{ label: "Reverse charge purchases (tax to pay)", value: data.inward.reverse_charge_tax },
+				]}
+			/>
+		</>
+	);
+
 	const renderGstr3b = () => {
 		const summary = data.summary;
 		const heads = ["iamt", "camt", "samt", "csamt"];
@@ -314,6 +463,8 @@ const ReportView = () => {
 					columns={[{ label: "Table", field: "label" }, { label: "Taxable value", num: true, render: (item) => (item.txval === undefined ? "" : formatMoney(item.txval)) }, { label: "IGST", num: true, render: money("iamt") }, { label: "CGST", num: true, render: money("camt") }, { label: "SGST", num: true, render: money("samt") }, { label: "Cess", num: true, render: money("csamt") }]}
 					rows={[
 						row("3.1(a) Outward taxable supplies (net of credit notes)", summary.output),
+						row("3.1(b) Zero rated: exports and SEZ", summary.zero_rated),
+						row("3.1(d) Inward supplies on reverse charge (tax to pay)", summary.reverse_charge),
 						{ label: "3.1(c) Nil rated outward supplies", txval: summary.nil_outward, iamt: 0, camt: 0, samt: 0, csamt: 0 },
 						row("4 Input tax credit available", summary.itc),
 						{ label: "Tax payable (output - credit)", ...Object.fromEntries(heads.map((head) => [head, summary.payable[head]])) },
@@ -371,10 +522,26 @@ const ReportView = () => {
 								<div className="col-md-2"><label className="form-label">To</label><input type="date" className="form-control" value={filters.to_date} onChange={(e) => setFilters({ ...filters, to_date: e.target.value })} /></div>
 							</>
 						)}
-						{report.filter === "month" && (
+						{(report.filter === "month" || report.filter === "gstr2b") && (
 							<div className="col-md-3"><label className="form-label">Month</label><input type="month" className="form-control" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} required /></div>
 						)}
-						{(report.filter === "as_on" || report.filter === "outstanding") && (
+						{report.filter === "year" && (
+							<div className="col-md-3"><label className="form-label">Financial year starting in</label><input type="number" min="2017" max="2100" className="form-control" value={filters.year} onChange={(e) => setFilters({ ...filters, year: e.target.value })} required /><div className="form-text">2026 = 2026-27</div></div>
+						)}
+						{report.filter === "gstr2b" && (
+							<div className="col-md-5"><label className="form-label">GSTR-2B file (JSON from the GST portal)</label><input type="file" accept=".json,application/json" className="form-control" onChange={chooseGstr2bFile} /></div>
+						)}
+						{report.filter === "stock_value" && (
+							<div className="col-md-3">
+								<label className="form-label">Value stock by</label>
+								<select className="form-select" value={filters.method} onChange={(e) => setFilters({ ...filters, method: e.target.value })}>
+									<option value="MASTER">Purchase rate of the item</option>
+									<option value="FIFO">FIFO (oldest purchase first)</option>
+									<option value="AVERAGE">Weighted average cost</option>
+								</select>
+							</div>
+						)}
+						{(report.filter === "as_on" || report.filter === "outstanding" || report.filter === "stock_value") && (
 							<div className="col-md-2"><label className="form-label">As on</label><input type="date" className="form-control" value={filters.as_on_date} onChange={(e) => setFilters({ ...filters, as_on_date: e.target.value })} /></div>
 						)}
 						<div className="col-md-2"><button className="btn btn-primary w-100" disabled={loading}>{loading ? "Loading..." : "Show"}</button></div>

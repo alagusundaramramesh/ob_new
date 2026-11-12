@@ -7,7 +7,7 @@ import Pagination from "../components/pagination";
 import Modal from "../components/modal";
 
 const EMPTY_ITEM = {
-	item_id: 0, name: "", type: "P", sku: "", hs: "", uom: "Nos", sale_rate: 0, purchase_rate: 0, mrp: 0, tax_id: 0,
+	item_id: 0, name: "", type: "P", sku: "", barcode: "", hs: "", uom: "Nos", sale_rate: 0, purchase_rate: 0, mrp: 0, tax_id: 0,
 	category_id: 0, stk_level: 0, opening_stk: 0, description: "", is_active: true,
 };
 
@@ -160,6 +160,7 @@ const Items = () => {
 								</select>
 							</div>
 							<div className="col-md-4"><label className="form-label">SKU</label><input className="form-control" name="sku" value={editing.sku || ""} onChange={handleChange} /></div>
+							<div className="col-md-4"><label className="form-label">Barcode</label><input className="form-control" name="barcode" maxLength={50} value={editing.barcode || ""} onChange={handleChange} /><div className="form-text">Scan it on the invoice screen to add the item</div></div>
 							<div className="col-md-4"><label className="form-label">HSN / SAC</label><input className="form-control" name="hs" value={editing.hs || ""} onChange={handleChange} /></div>
 							<div className="col-md-4"><label className="form-label">Unit</label><input className="form-control" name="uom" value={editing.uom || ""} onChange={handleChange} /></div>
 							<div className="col-md-4"><label className="form-label">Sale rate</label><input type="number" step="0.01" min="0" className="form-control" name="sale_rate" value={editing.sale_rate} onChange={handleChange} /></div>

@@ -16,6 +16,7 @@ import Suppliers from './pages/suppliers';
 import Items from './pages/items';
 import Categories from './pages/categories';
 import Accounts from './pages/accounts';
+import OpeningBalances from './pages/opening_balances';
 import Banks from './pages/banks';
 import Transactions from './pages/transactions';
 import TransactionForm from './pages/transaction_form';
@@ -26,6 +27,19 @@ import Settings from './pages/settings';
 import MyAccount from './pages/my_account';
 import Recurring from './pages/recurring';
 import Einvoice from './pages/einvoice';
+import OfficeAssets from './pages/office_assets';
+import OfficeAssignments from './pages/office_assignments';
+import { useGlobalState } from "./contexts/user";
+
+/* Office Inventory users do not have the Dashboard module, so they start on the asset list */
+const Home = () => {
+  const { user } = useGlobalState();
+  const permissions = user.permissions || [];
+  if (!permissions.includes("DAS") && permissions.includes("OIAST")) {
+    return <Navigate to="/office-assets" replace />;
+  }
+  return <Dashboard />;
+};
 
 const router = createBrowserRouter(
   createRoutesFromElements(
@@ -40,13 +54,16 @@ const router = createBrowserRouter(
 
       {/* Pages after login */}
       <Route path='/' element={<Mainlayout />}>
-        <Route index element={<Dashboard />} />
+        <Route index element={<Home />} />
         <Route path='/customers' element={<Customers />} />
         <Route path='/suppliers' element={<Suppliers />} />
         <Route path='/items' element={<Items />} />
         <Route path='/categories' element={<Categories />} />
         <Route path='/accounts' element={<Accounts />} />
+        <Route path='/opening-balances' element={<OpeningBalances />} />
         <Route path='/banks' element={<Banks />} />
+        <Route path='/office-assets' element={<OfficeAssets />} />
+        <Route path='/office-assignments' element={<OfficeAssignments />} />
 
         {/* Documents: /t/sales-invoice, /t/sales-invoice/new, /t/sales-invoice/12, /t/sales-invoice/12/view */}
         <Route path='/t/:type_key' element={<Transactions />} />

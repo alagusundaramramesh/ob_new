@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "react-toastify";
 import {
-	checkEinvoice, generateEinvoice, cancelEinvoice, checkEwb, generateEwb, cancelEwb, updateEwbVehicle, getTransporters,
+	checkEinvoice, generateEinvoice, cancelEinvoice, checkEwb, generateEwb, cancelEwb, updateEwbVehicle, extendEwb, updateEwbTransporter, getTransporters,
 } from "../../services/api";
 import { useGlobalState } from "../../contexts/user";
 import Modal from "../modal";
@@ -131,6 +131,28 @@ const EinvoicePanel = ({ transaction, onChanged }) => {
 		onChanged();
 	}
 
+	async function doExtend(e) {
+		e.preventDefault();
+		setBusy(true);
+		const result = await extendEwb({ trans_id: transaction.trans_id, ...dialog.form });
+		setBusy(false);
+		if (result.status !== "S") { toast.error(result.message); return; }
+		toast.success(result.message);
+		setDialog(null);
+		onChanged();
+	}
+
+	async function doUpdateTransporter(e) {
+		e.preventDefault();
+		setBusy(true);
+		const result = await updateEwbTransporter({ trans_id: transaction.trans_id, ...dialog.form });
+		setBusy(false);
+		if (result.status !== "S") { toast.error(result.message); return; }
+		toast.success(result.message);
+		setDialog(null);
+		onChanged();
+	}
+
 	async function doUpdateVehicle(e) {
 		e.preventDefault();
 		setBusy(true);
@@ -180,6 +202,8 @@ const EinvoicePanel = ({ transaction, onChanged }) => {
 				{canEinvoice && hasActiveIrn && <button className="btn btn-sm btn-outline-danger" onClick={() => setDialog({ kind: "cancel_irn", reason: 2, remark: "", also_delete: false })}>Cancel e-invoice</button>}
 				{canEwb && !hasActiveEwb && <button className="btn btn-sm btn-outline-primary" onClick={openEwb}>Generate e-way bill</button>}
 				{canEwb && hasActiveEwb && <button className="btn btn-sm btn-outline-secondary" onClick={() => setDialog({ kind: "vehicle", form: { vehicle_no: "", from_place: user.company.city || "", from_state: user.company.state_code || "", reason_code: 1, reason_remark: "" } })}>Update vehicle</button>}
+				{canEwb && hasActiveEwb && <button className="btn btn-sm btn-outline-secondary" onClick={() => setDialog({ kind: "extend", form: { vehicle_no: ewb.vehicle_no || "", from_place: user.company.city || "", from_state: user.company.state_code || "", from_pincode: user.company.zip || "", remaining_distance: "", reason_code: 5, reason_remark: "", consignment_status: "M" } })}>Extend validity</button>}
+				{canEwb && hasActiveEwb && <button className="btn btn-sm btn-outline-secondary" onClick={() => setDialog({ kind: "transporter", form: { transporter_gstin: "", transporter_name: "" } })}>Change transporter</button>}
 				{canEwb && hasActiveEwb && <button className="btn btn-sm btn-outline-danger" onClick={() => setDialog({ kind: "cancel_ewb", reason: 2, remark: "" })}>Cancel e-way bill</button>}
 			</div>
 
@@ -282,6 +306,41 @@ const EinvoicePanel = ({ transaction, onChanged }) => {
 							</select></div>
 						<div className="mb-3"><label className="form-label">Remark</label><input className="form-control" maxLength={50} value={dialog.form.reason_remark} onChange={(e) => set({ form: { ...dialog.form, reason_remark: e.target.value } })} /></div>
 						<div className="text-end"><button type="button" className="btn btn-light me-2" onClick={() => setDialog(null)}>Close</button><button className="btn btn-primary" disabled={busy}>Update vehicle</button></div>
+					</form>
+				</Modal>
+			)}
+
+			{dialog && dialog.kind === "extend" && (
+				<Modal title={`Extend validity - e-way bill ${ewb.ewb_no}`} onClose={() => setDialog(null)} size="md">
+					<form onSubmit={doExtend}>
+						<div className="form-text mb-3">Valid till {ewb.valid_till}. The portal accepts this from 8 hours before the bill ends until 8 hours after.</div>
+						<div className="mb-3"><label className="form-label">Vehicle number</label><input className="form-control" value={dialog.form.vehicle_no} onChange={(e) => set({ form: { ...dialog.form, vehicle_no: e.target.value } })} /></div>
+						<div className="row g-3 mb-3">
+							<div className="col-6"><label className="form-label">Place where the goods are now *</label><input className="form-control" value={dialog.form.from_place} onChange={(e) => set({ form: { ...dialog.form, from_place: e.target.value } })} required /></div>
+							<div className="col-3"><label className="form-label">State code *</label><input className="form-control" maxLength={2} value={dialog.form.from_state} onChange={(e) => set({ form: { ...dialog.form, from_state: e.target.value } })} required /></div>
+							<div className="col-3"><label className="form-label">PIN code *</label><input className="form-control" maxLength={6} value={dialog.form.from_pincode} onChange={(e) => set({ form: { ...dialog.form, from_pincode: e.target.value } })} required /></div>
+						</div>
+						<div className="row g-3 mb-3">
+							<div className="col-6"><label className="form-label">Distance still to travel (km) *</label><input type="number" min="1" max="4000" className="form-control" value={dialog.form.remaining_distance} onChange={(e) => set({ form: { ...dialog.form, remaining_distance: e.target.value } })} required /></div>
+							<div className="col-6"><label className="form-label">Goods are</label>
+								<select className="form-select" value={dialog.form.consignment_status} onChange={(e) => set({ form: { ...dialog.form, consignment_status: e.target.value } })}><option value="M">In movement</option><option value="T">In transit (at a hub)</option></select></div>
+						</div>
+						<div className="mb-3"><label className="form-label">Reason</label>
+							<select className="form-select" value={dialog.form.reason_code} onChange={(e) => set({ form: { ...dialog.form, reason_code: Number(e.target.value) } })}>
+								<option value={1}>Natural calamity</option><option value={2}>Law and order</option><option value={3}>Transshipment</option><option value={4}>Accident</option><option value={5}>Other</option>
+							</select></div>
+						<div className="mb-3"><label className="form-label">Remark</label><input className="form-control" maxLength={50} value={dialog.form.reason_remark} onChange={(e) => set({ form: { ...dialog.form, reason_remark: e.target.value } })} /></div>
+						<div className="text-end"><button type="button" className="btn btn-light me-2" onClick={() => setDialog(null)}>Close</button><button className="btn btn-primary" disabled={busy}>Extend validity</button></div>
+					</form>
+				</Modal>
+			)}
+
+			{dialog && dialog.kind === "transporter" && (
+				<Modal title={`Change transporter - e-way bill ${ewb.ewb_no}`} onClose={() => setDialog(null)} size="md">
+					<form onSubmit={doUpdateTransporter}>
+						<div className="mb-3"><label className="form-label">Transporter GSTIN *</label><input className="form-control" maxLength={15} value={dialog.form.transporter_gstin} onChange={(e) => set({ form: { ...dialog.form, transporter_gstin: e.target.value.toUpperCase() } })} required /></div>
+						<div className="mb-3"><label className="form-label">Transporter name</label><input className="form-control" value={dialog.form.transporter_name} onChange={(e) => set({ form: { ...dialog.form, transporter_name: e.target.value } })} /></div>
+						<div className="text-end"><button type="button" className="btn btn-light me-2" onClick={() => setDialog(null)}>Close</button><button className="btn btn-primary" disabled={busy}>Change transporter</button></div>
 					</form>
 				</Modal>
 			)}

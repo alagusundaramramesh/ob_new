@@ -26,6 +26,18 @@ router.post('/', async (req, res) => {
                 return res.send({ status: "E", message: "An item with this SKU already exists" });
             }
         }
+        // Barcode: scanned on the invoice screen to add the item, so it must point to one item only
+        let barcode = String(data.barcode || '').trim();
+        if (barcode) {
+            if (barcode.length > 50) {
+                return res.send({ status: "E", message: "Barcode can have up to 50 characters" });
+            }
+            let duplicate_barcode = await dbobj.collection('ob_items').findOne(
+                { c_id: data.c_id, barcode: barcode, stat: "A", item_id: { $ne: data.item_id || 0 } });
+            if (duplicate_barcode) {
+                return res.send({ status: "E", message: `The barcode is already used by ${duplicate_barcode.name}` });
+            }
+        }
         if (data.tax_id) {
             let tax = await dbobj.collection('ob_taxes').findOne({ c_id: data.c_id, tax_id: data.tax_id, stat: "A" });
             if (!tax) {
@@ -45,6 +57,7 @@ router.post('/', async (req, res) => {
             type: data.type,
             hs: data.hs || '',
             sku: data.sku || '',
+            barcode: barcode,
             uom: data.uom || '',
             description: data.description || '',
             category_id: data.category_id || 0,

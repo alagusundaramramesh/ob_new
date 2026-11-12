@@ -34,7 +34,16 @@ router.post('/', async (req, res) => {
             if (!item) {
                 return res.send({ status: "E", message: `Item ${price_item.item_id} not found` });
             }
-            fixed_rates.push({ item_id: price_item.item_id, rate: UTILS.round2(price_item.rate) });
+            // Quantity slabs: from "min_qty" onwards the item costs "rate"
+            let slabs = [];
+            for (const slab of Array.isArray(price_item.slabs) ? price_item.slabs : []) {
+                if (!(Number(slab.min_qty) > 0) || !(Number(slab.rate) >= 0) || slabs.some(saved => saved.min_qty === Number(slab.min_qty))) {
+                    return res.send({ status: "E", message: "Each quantity slab needs a different quantity above zero and a rate of zero or more" });
+                }
+                slabs.push({ min_qty: Number(slab.min_qty), rate: UTILS.round2(slab.rate) });
+            }
+            slabs.sort((first, second) => first.min_qty - second.min_qty);
+            fixed_rates.push({ item_id: price_item.item_id, rate: UTILS.round2(price_item.rate), slabs: slabs });
         }
 
         let duplicate_list = await dbobj.collection('ob_price_lists').findOne(

@@ -89,11 +89,11 @@ Legend: **Done** = working and covered by the smoke test, **Partial** = a simple
 | Purchase quotes, orders, goods receipts, bills, notes, payments | Done | |
 | Journal, cash contra | Done | |
 | Retail sale (`SR`) | Partial | Backend supports it (customer optional); no POS screen |
-| Opening balances (`AO`), expense invoices (`EI`), advance payments (`PA`) | Not yet | Opening balances are typed on the accounts / contacts |
+| Opening balances (`AO`), expense invoices (`EI`), advance payments (`PA`) | Partial | Opening balances: one screen for all accounts with an automatic entry to Opening Balance Equity (not a dated document). Expense invoices and advance payments not yet |
 | Job order (`JO`), manufacturing journal (`MJ`), BOM, transfer orders (`TO`, `TD`, `TR`), physical stock (`PS`) | Not yet | `Bom`, `Joborder`, `Storage_transactions`, modules `Storage` and `Order` |
 | Reference between documents | Partial | `ref_id`; no partial conversion (quantity pending) |
 | Approvals and workflows | Not yet | `Workflow`, `TransApproval` |
-| Discount rules, max discount, negative item handlers | Not yet | `Trans/Handlers` |
+| Discount rules, max discount, negative item handlers | Partial | The discount % of a customer is the default discount of its lines; credit limit with block. Max discount and handlers not yet (`Trans/Handlers`) |
 
 ### Reports
 
@@ -107,19 +107,19 @@ Legend: **Done** = working and covered by the smoke test, **Partial** = a simple
 | `Report_transactions` sales / purchase register | `report_sales_register`, `report_purchase_register` | Done |
 | Outstanding / aging | `report_outstanding` | Done |
 | `Report_items` item sales | `report_item_sales` | Partial |
-| `Report_stocks` stock summary / ledger | `report_stock_summary`, `report_stock_ledger` | Partial (simple valuation, no aging, expiry, batch, reorder report page) |
-| `Gstr` (GSTR-1, 2, 3B, 4, 9) | `report_gstr1`, `report_gstr3b`, `report_gst_summary` | GSTR-1 and GSTR-3B JSON done. GSTR-2 / 2A reconciliation, GSTR-4 and GSTR-9 not ported. Exports, reverse charge, composition, SEZ and the document issue table are not reported |
+| `Report_stocks` stock summary / ledger | `report_stock_summary`, `report_stock_ledger` | Partial (valuation by item purchase rate, FIFO or weighted average; no aging, expiry, batch, reorder report page) |
+| `Gstr` (GSTR-1, 2, 3B, 4, 9) | `report_gstr1`, `report_gstr3b`, `report_gst_summary` | GSTR-1 (with exports, SEZ, document issue table) and GSTR-3B JSON done, GSTR-2B reconciliation (`report_gstr2b`), GSTR-9 and GSTR-4 as figures (`report_gstr9`, `report_gstr4`, no JSON). Not done: amendments (B2BA, CDNRA), advances, deemed exports, ECO, GSTR-2A, GSTR-9C, CMP-08 JSON |
 | Sales rep, referred by, tags, customer stock, supplier stock, margin claim, pending orders, postdated cheques, report builder, group / multiple reports | - | Not yet |
 
 ### Not yet ported (larger modules)
 
 | Area | PHP location | Notes |
 |------|--------------|-------|
-| GST e-invoice (IRN) and e-way bill | `Einvoice`, `Ewb`, `ThirdParty/einvoice`, `EwbTransTable` | Done: IRN, QR code, cancel, e-way bill by IRN and direct, vehicle update, transporters, work lists. The TaxPro provider is written from the PHP code but **not yet run against the real sandbox**. Exports, SEZ, consolidated e-way bills and dynamic QR are not ported |
+| GST e-invoice (IRN) and e-way bill | `Einvoice`, `Ewb`, `ThirdParty/einvoice`, `EwbTransTable` | Done: IRN, QR code, cancel, e-way bill by IRN and direct, vehicle update, extend validity, transporter change, transporters, work lists. The TaxPro provider is written from the PHP code and the NIC API description but **not yet run against the real sandbox**. E-invoice for exports / SEZ / zero rated, consolidated e-way bills, bulk generation and dynamic QR are not ported |
 | Digital signature of PDF | `Dsign`, `Libraries/DigitalSign` | |
 | PDF print / email / SMS of documents | `Transaction::pdf`, `Views`, `mpdf`, `OutputSMS` | PDF download, email with attachment, 3 templates, logo, footer, terms and bank details are done. The PHP print designer (`ob_printsettings`, custom layouts per document) and SMS are not ported |
 | Tally XML export / import, Excel export, `TransImport` | `Classes/Export`, `Classes/Import` | |
-| Price lists / rate sheets | `Ratesheet`, `PriceList` | Done in a simple form (percent + fixed rates + validity, per contact). Quantity slabs, franchise lists and the rate sheet import are not ported |
+| Price lists / rate sheets | `Ratesheet`, `PriceList` | Done (percent + fixed rates + quantity slabs + validity, per contact). Franchise lists and the rate sheet import are not ported |
 | Coupons, customer points, loyalty | `Coupons`, `CustomerPoints`, module `Points` | |
 | POS / counter, KOT (restaurant), weighment, section | `Countertrans`, modules `Kot`, `Weighment`, `Section` | |
 | E-commerce API and sync | module `Ecommerce`, `Api`, `Sync`, `EcomApiController` | Public API with API keys |
@@ -128,18 +128,18 @@ Legend: **Done** = working and covered by the smoke test, **Partial** = a simple
 | Recurring invoices | `Obo/RecurringTransaction`, `Obo/RecurringInvoice` | Done (sales invoice and purchase bill, see the project guide) |
 | Payment reminders | `Obo/PaymentReminder` | Done by email (before due, overdue, manual). SMS / WhatsApp not ported |
 | Weekly backup | `Obo/WeeklyBackup` | Not yet (use `mongodump` on the server) |
-| Custom fields, attributes, barcode, cheque printing, budget, tags, attachments | `Fields`, `Attributes`, `Barcode`, `Cheque`, `Budget`, `Tag`, `Attachment` | |
+| Custom fields, attributes, barcode, cheque printing, budget, tags, attachments | `Fields`, `Attributes`, `Barcode`, `Cheque`, `Budget`, `Tag`, `Attachment` | Barcode (one per item, scan box on the invoice screen) and contact tags are done. The rest is not |
 | Installer, updater, licence | module `Installer`, `Update`, `ObLicense` | Not needed in the new design |
 
 ## 5. Suggested order for the next work
 
-1. **GSTR-2B reconciliation** (match purchases with the supplier data of the portal), GSTR-9.
-2. **Opening balances document** and **import of the old MySQL data** (users must reset passwords, see section 3).
-3. **Customer discount rules** and quantity slabs for price lists.
-4. **Try the e-invoice with TaxPro sandbox credentials** and compare with the PHP JSON (before any production use).
-5. **Branches** (add `b_id` to the collections and to the token) and **multi currency**.
-6. FIFO / average **stock valuation**, batch / serial items, units conversion.
-7. POS screen for retail sale.
+1. **Run the MySQL import on a copy of real data** with invoices and compare the reports with the PHP app (see MYSQL_IMPORT.md and GO_LIVE_CHECKLIST.md).
+2. **Try the e-invoice and e-way bill with TaxPro sandbox credentials** and compare with the PHP JSON (before any production use).
+3. **Batch / serial items, bundles, attributes, item images, units conversion** (these change the stock engine).
+4. **Print designer** (custom layout per document) and **SMS / WhatsApp** reminders (needs a provider account).
+5. **Loyalty points**, max discount, expense invoices, advance payments.
+6. **Branches** (add `b_id` to the collections and to the token) and **multi currency**.
+7. POS screen for retail sale, Google login and captcha, dynamic QR for B2C.
 
 Each step is a new route group, one class in `server/classes`, and a few pages; follow *How to add a new feature* in `PROJECT_GUIDE.md`.
 

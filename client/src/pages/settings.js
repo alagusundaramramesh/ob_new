@@ -73,6 +73,20 @@ const CompanyTab = () => {
 					<label className="form-check-label" htmlFor="allow_negative_stock">Allow negative stock</label>
 				</div>
 			</div>
+			<div className="col-md-4">
+				<label className="form-label">GST scheme</label>
+				<select className="form-select" name="gst_scheme" value={form.gst_scheme || "REGULAR"} onChange={handleChange}>
+					<option value="REGULAR">Regular (GSTR-1, GSTR-3B)</option>
+					<option value="COMPOSITION">Composition (CMP-08, GSTR-4)</option>
+				</select>
+			</div>
+			{form.gst_scheme === "COMPOSITION" && (
+				<div className="col-md-4">
+					<label className="form-label">Composition tax rate (% of turnover)</label>
+					<input type="number" step="0.01" min="0" className="form-control" name="composition_rate" value={form.composition_rate || 1} onChange={handleChange} />
+					<div className="form-text">1% traders and manufacturers, 5% restaurants, 6% other services. No GST can be charged on bills.</div>
+				</div>
+			)}
 			<div className="col-12"><button className="btn btn-primary">Save</button></div>
 		</form>
 	);
@@ -230,7 +244,10 @@ const PriceListsTab = () => {
 			adjust_percent: Number(editing.adjust_percent) || 0,
 			valid_from: editing.valid_from || null,
 			valid_till: editing.valid_till || null,
-			rates: editing.rates.filter((priceItem) => priceItem.item_id).map((priceItem) => ({ item_id: Number(priceItem.item_id), rate: Number(priceItem.rate) })),
+			rates: editing.rates.filter((priceItem) => priceItem.item_id).map((priceItem) => ({
+					item_id: Number(priceItem.item_id), rate: Number(priceItem.rate),
+					slabs: (priceItem.slabs || []).filter((slab) => Number(slab.min_qty) > 0).map((slab) => ({ min_qty: Number(slab.min_qty), rate: Number(slab.rate) })),
+				})),
 		});
 		if (result.status !== "S") { toast.error(result.message || "Unable to save"); return; }
 		toast.success(result.message);
@@ -300,16 +317,32 @@ const PriceListsTab = () => {
 						<table className="table table-sm align-middle">
 							<tbody>
 								{editing.rates.map((priceItem, index) => (
-									<tr key={index}>
-										<td>
-											<select className="form-select form-select-sm" value={priceItem.item_id} onChange={(e) => updateRate(index, { item_id: parseInt(e.target.value) })}>
-												<option value={0}>Select item</option>
-												{items.map((item) => <option key={item.item_id} value={item.item_id}>{item.name}</option>)}
-											</select>
-										</td>
-										<td style={{ width: 140 }}><input type="number" step="0.01" min="0" className="form-control form-control-sm" value={priceItem.rate} onChange={(e) => updateRate(index, { rate: e.target.value })} /></td>
-										<td style={{ width: 40 }}><button type="button" className="btn btn-sm btn-outline-danger" onClick={() => setEditing({ ...editing, rates: editing.rates.filter((entry, rateIndex) => rateIndex !== index) })}><i className="bi bi-x-lg" /></button></td>
-									</tr>
+									<React.Fragment key={index}>
+										<tr>
+											<td>
+												<select className="form-select form-select-sm" value={priceItem.item_id} onChange={(e) => updateRate(index, { item_id: parseInt(e.target.value) })}>
+													<option value={0}>Select item</option>
+													{items.map((item) => <option key={item.item_id} value={item.item_id}>{item.name}</option>)}
+												</select>
+											</td>
+											<td style={{ width: 140 }}><input type="number" step="0.01" min="0" className="form-control form-control-sm" value={priceItem.rate} onChange={(e) => updateRate(index, { rate: e.target.value })} /></td>
+											<td style={{ width: 40 }}><button type="button" className="btn btn-sm btn-outline-danger" onClick={() => setEditing({ ...editing, rates: editing.rates.filter((entry, rateIndex) => rateIndex !== index) })}><i className="bi bi-x-lg" /></button></td>
+										</tr>
+										<tr>
+											<td colSpan="3" className="border-0 pt-0 ps-4">
+												{(priceItem.slabs || []).map((slab, slabIndex) => (
+													<div key={slabIndex} className="d-flex align-items-center gap-2 mb-1 small">
+														<span>From quantity</span>
+														<input type="number" step="any" min="0" className="form-control form-control-sm" style={{ width: 90 }} value={slab.min_qty} onChange={(e) => updateRate(index, { slabs: priceItem.slabs.map((entry, entryIndex) => (entryIndex === slabIndex ? { ...entry, min_qty: e.target.value } : entry)) })} />
+														<span>rate</span>
+														<input type="number" step="0.01" min="0" className="form-control form-control-sm" style={{ width: 110 }} value={slab.rate} onChange={(e) => updateRate(index, { slabs: priceItem.slabs.map((entry, entryIndex) => (entryIndex === slabIndex ? { ...entry, rate: e.target.value } : entry)) })} />
+														<button type="button" className="btn btn-sm btn-outline-danger" onClick={() => updateRate(index, { slabs: priceItem.slabs.filter((entry, entryIndex) => entryIndex !== slabIndex) })}><i className="bi bi-x-lg" /></button>
+													</div>
+												))}
+												<button type="button" className="btn btn-link btn-sm p-0" onClick={() => updateRate(index, { slabs: [...(priceItem.slabs || []), { min_qty: "", rate: priceItem.rate }] })}>+ Add quantity slab (bigger quantity, other rate)</button>
+											</td>
+										</tr>
+									</React.Fragment>
 								))}
 							</tbody>
 						</table>

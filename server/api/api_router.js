@@ -98,12 +98,26 @@ class api_router {
 		route.use('/ewb_generate', require('./routes/ewb_generate'));
 		route.use('/ewb_cancel', require('./routes/ewb_cancel'));
 		route.use('/ewb_update_vehicle', require('./routes/ewb_update_vehicle'));
+		route.use('/ewb_extend', require('./routes/ewb_extend'));
+		route.use('/opening_balance_list', require('./routes/opening_balance_list'));
+		route.use('/opening_balance_save', require('./routes/opening_balance_save'));
+		route.use('/ewb_update_transporter', require('./routes/ewb_update_transporter'));
 		route.use('/transporter_list', require('./routes/transporter_list'));
 		route.use('/transporter_save', require('./routes/transporter_save'));
 		route.use('/transporter_delete', require('./routes/transporter_delete'));
 		route.use('/print_settings_save', require('./routes/print_settings_save'));
 		route.use('/company_logo_save', require('./routes/company_logo_save'));
 		route.use('/company_logo_delete', require('./routes/company_logo_delete'));
+
+		/* OFFICE INVENTORY (computers, laptops ... given to employees) */
+		route.use('/office_asset_list', require('./routes/office_asset_list'));
+		route.use('/office_asset_save', require('./routes/office_asset_save'));
+		route.use('/office_asset_delete', require('./routes/office_asset_delete'));
+		route.use('/office_asset_status', require('./routes/office_asset_status'));
+		route.use('/office_asset_details', require('./routes/office_asset_details'));
+		route.use('/office_asset_assign', require('./routes/office_asset_assign'));
+		route.use('/office_asset_return', require('./routes/office_asset_return'));
+		route.use('/office_assignment_list', require('./routes/office_assignment_list'));
 
 		/* REPORTS */
 		route.use('/report_ledger', require('./routes/report_ledger'));
@@ -120,6 +134,9 @@ class api_router {
 		route.use('/report_gst_summary', require('./routes/report_gst_summary'));
 		route.use('/report_gstr1', require('./routes/report_gstr1'));
 		route.use('/report_gstr3b', require('./routes/report_gstr3b'));
+		route.use('/report_gstr2b', require('./routes/report_gstr2b'));
+		route.use('/report_gstr9', require('./routes/report_gstr9'));
+		route.use('/report_gstr4', require('./routes/report_gstr4'));
 
 		return route;
 	}

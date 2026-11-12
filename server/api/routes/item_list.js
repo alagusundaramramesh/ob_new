@@ -25,7 +25,7 @@ router.post('/', async (req, res) => {
         }
         if (search) {
             let search_regex = { $regex: UTILS.escapeRegex(search), $options: "i" };
-            query_parameter.$or = [{ name: search_regex }, { sku: search_regex }, { item_code: search_regex }];
+            query_parameter.$or = [{ name: search_regex }, { sku: search_regex }, { item_code: search_regex }, { barcode: search_regex }];
         }
 
         let total_count = await dbobj.collection('ob_items').countDocuments(query_parameter);

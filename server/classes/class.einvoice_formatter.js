@@ -71,6 +71,9 @@ class EinvoiceFormatter {
             add('E-invoice is only for sales invoices, credit notes and debit notes');
             return errors;
         }
+        if (transaction.gst_treatment === 'EXPORT' || transaction.gst_treatment === 'SEZ' || transaction.zero_rated) {
+            add('E-invoice for exports, SEZ and zero rated supplies is not supported yet. Generate it on the e-invoice portal');
+        }
         if (transaction.einvoice && transaction.einvoice.status === 'ACT') {
             add(`The e-invoice is already generated (IRN ${transaction.einvoice.irn})`);
         }

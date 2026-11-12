@@ -110,7 +110,65 @@ class Report {
      * The value is quantity x the purchase rate of the item master (a simple valuation, not FIFO / average).
      * Returns [{ item_id, name, uom, qty, rate, value }]
      */
-    async getStockPosition(dbobj, c_id, as_on_date) {
+    /*
+     * Value of the stock of one item from its moves (oldest first).
+     * FIFO: what goes out is taken from the oldest purchases first; what is left is valued at the cost of the newest purchases.
+     * AVERAGE: weighted average cost, recalculated at every purchase.
+     * A move with cost null (a sales return) comes in at the cost the stock has at that moment. A move without cost (opening stock,
+     * stock adjustment) comes in at its rate. Stock that goes out when there is none is not valued (the stock is negative then).
+     */
+    valueItemStock(moves, method) {
+        let layers = [];       // FIFO: [{ qty, cost }] oldest first
+        let qty = 0, value = 0; // AVERAGE
+        let last_cost = 0;
+        for (const move of moves) {
+            if (move.qty_in > 0) {
+                let unit_cost;
+                if (move.cost === null) {
+                    unit_cost = method === 'FIFO'
+                        ? (layers.reduce((sum, layer) => sum + layer.qty, 0) > 0 ? layers.reduce((sum, layer) => sum + layer.qty * layer.cost, 0) / layers.reduce((sum, layer) => sum + layer.qty, 0) : last_cost)
+                        : (qty > 0 ? value / qty : last_cost);
+                } else {
+                    unit_cost = move.cost !== undefined ? move.cost : (move.rate || 0);
+                }
+                last_cost = unit_cost;
+                layers.push({ qty: move.qty_in, cost: unit_cost });
+                qty += move.qty_in;
+                value += move.qty_in * unit_cost;
+            }
+            if (move.qty_out > 0) {
+                let remaining = move.qty_out;
+                while (remaining > 0 && layers.length > 0) {
+                    let used = Math.min(remaining, layers[0].qty);
+                    layers[0].qty -= used;
+                    remaining -= used;
+                    if (layers[0].qty <= 0) layers.shift();
+                }
+                let average_cost = qty > 0 ? value / qty : last_cost;
+                value -= move.qty_out * average_cost;
+                qty -= move.qty_out;
+            }
+        }
+        if (method === 'FIFO') {
+            return UTILS.round2(layers.reduce((sum, layer) => sum + layer.qty * layer.cost, 0));
+        }
+        return qty > 0 ? UTILS.round2(value) : 0;
+    }
+
+    async getStockPosition(dbobj, c_id, as_on_date, method = 'MASTER') {
+        let valued_by_method = {};
+        if (method === 'FIFO' || method === 'AVERAGE') {
+            let all_moves = await dbobj.collection('ob_stock_ledger').find(
+                { c_id: c_id, trans_date: { $lte: as_on_date } },
+                { projection: { _id: 0, item_id: 1, qty_in: 1, qty_out: 1, rate: 1, cost: 1 } }).sort({ trans_date: 1, trans_id: 1 }).toArray();
+            let moves_of_item = {};
+            all_moves.forEach(move => {
+                moves_of_item[move.item_id] = moves_of_item[move.item_id] || [];
+                moves_of_item[move.item_id].push(move);
+            });
+            Object.keys(moves_of_item).forEach(item_id => { valued_by_method[item_id] = this.valueItemStock(moves_of_item[item_id], method); });
+        }
+
         let moves = await dbobj.collection('ob_stock_ledger').aggregate([
             { $match: { c_id: c_id, trans_date: { $lte: as_on_date } } },
             { $group: { _id: '$item_id', qty: { $sum: { $subtract: ['$qty_in', '$qty_out'] } } } }
@@ -124,6 +182,8 @@ class Report {
 
         return items.map(item => {
             let qty = qty_map[item.item_id] || 0;
+            let has_method_value = method !== 'MASTER' && valued_by_method[item.item_id] !== undefined;
+            let value = has_method_value ? valued_by_method[item.item_id] : UTILS.round2(qty * item.purchase_rate);
             return {
                 item_id: item.item_id,
                 name: item.name,
@@ -131,8 +191,8 @@ class Report {
                 uom: item.uom,
                 stk_level: item.stk_level,
                 qty: qty,
-                rate: item.purchase_rate,
-                value: UTILS.round2(qty * item.purchase_rate)
+                rate: has_method_value ? (qty > 0 ? UTILS.round2(value / qty) : 0) : item.purchase_rate,
+                value: value
             };
         });
     }

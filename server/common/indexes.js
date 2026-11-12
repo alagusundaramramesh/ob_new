@@ -27,6 +27,10 @@ async function ensureIndexes(dbobj) {
     await dbobj.collection('ob_reminders').createIndex({ c_id: 1, trans_id: 1, sent_on: -1 });
     await dbobj.collection('ob_recurring').createIndex({ stat: 1, is_active: 1, next_date: 1 });
     await dbobj.collection('ob_bank_transactions').createIndex({ c_id: 1, bank_id: 1, btr_date: -1 });
+    await dbobj.collection('ob_office_assets').createIndex({ c_id: 1, asset_id: 1 }, { unique: true });
+    await dbobj.collection('ob_office_assets').createIndex({ c_id: 1, asset_tag: 1 });
+    await dbobj.collection('ob_office_assignments').createIndex({ c_id: 1, assignment_id: 1 }, { unique: true });
+    await dbobj.collection('ob_office_assignments').createIndex({ c_id: 1, asset_id: 1, from_date: -1 });
 }
 
 module.exports = { ensureIndexes };

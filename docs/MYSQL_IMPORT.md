@@ -21,8 +21,23 @@ Ids are kept (`ob_trans.id` becomes `trans_id`, and so on), so references betwee
 7. Start the server and compare in the new app: trial balance, customer / supplier balances, stock summary, a few invoices
    against the PHP reports.
 
-No MySQL access from this machine? Export each table to `<table>.json` (an array of rows, column names as in MySQL), put the files in a
-folder and use `--from-json ./folder`.
+No MySQL access from this machine? Two ways to use a JSON export:
+
+- **One phpMyAdmin file** (Export > Format JSON, all tables): `--from-json "C:/path/outputbooks.json"`.
+- **One file per table** (`<table>.json`, an array of rows, column names as in MySQL) in a folder: `--from-json ./folder`.
+
+phpMyAdmin writes every value as text ("59", "100.00"). The script turns these into numbers, except columns that hold text such as names,
+item codes, phone numbers and document numbers (`TEXT_COLUMNS` at the top of the script).
+
+To compare the reports afterwards, export at least: `ob_companies`, `ob_users`, `ob_compusers`, `ob_role`, `ob_role_permissions`, `ob_account`, `ob_contacts`,
+`ob_contacts_address`, `ob_items`, `ob_category`, `ob_tax`, `ob_taxdetail`, `ob_series`, `ob_bank`, `ob_trans`, `ob_trans_items`, `ob_trans_tax`,
+`ob_trans_pay`, `ob_trans_payment`, `ob_trans_acc`. Use a copy of the data.
+
+## Rules the script applies
+
+- **Role codes** are translated: PHP `A` (Administrator) becomes `C` here (all modules), PHP `C` (Accountant) becomes `F`, other codes stay, unknown codes become `U` (custom).
+- **Payment modes**: PHP keeps them as shared system rows (`cId = 0`), so the company gets the default payment modes of this app.
+- **Contacts** of type `B` (a PHP branch such as "Main Branch") are not imported. Only customers (`C`) and suppliers (`S`).
 
 ## What is converted
 
@@ -48,7 +63,9 @@ branches (`bId`), second currencies, other companies. See `PHP_MIGRATION_MAP.md`
 ## Checks and limits
 
 - The script refuses to run when the company already exists in MongoDB, so a second run cannot duplicate data.
-- It was tested with a small set of sample rows (a sales invoice with tax, a receipt allocated to it, stock). It has **not** been run against a
-  real OutputBooks database, so always do the dry run and the comparison in step 7 before relying on it.
+- It was tested with a small set of sample rows (a sales invoice with tax, a receipt allocated to it, stock), and with a real phpMyAdmin export of a
+  new company (accounts, contacts, items, taxes, series, roles; no documents). The imported company opened in the app (login, contacts, items, trial
+  balance, dashboard). It has **not** yet been run on a database with real invoices and receipts, so always do the dry run and the comparison in step 7
+  before relying on it.
 - Documents made from other documents keep `ref_id` only when the PHP row has it; the document type of the source is taken from `refTtype`.
 - Posting rules of the new app may differ from the PHP ones for edited documents; the imported ledger is not recalculated until a document is edited.

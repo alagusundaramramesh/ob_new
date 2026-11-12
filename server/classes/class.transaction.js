@@ -2,6 +2,7 @@ const UTILS = require('../utils/util.functions');
 const CONFIG = require('../common/inc.config');
 const { BusinessError } = require('../utils/util.error');
 const PRICE_LIST = require('./class.price_list');
+const REPORT = require('./class.report');
 
 const TT = CONFIG.TRANS_TYPES;
 
@@ -84,10 +85,15 @@ class Transaction {
         let tax_map = {};
         taxes.forEach(tax => { tax_map[tax.tax_id] = tax; });
 
-        // Inside the state: CGST + SGST. Outside the state: IGST
-        let same_state = !input.dst_state_code || !company.state_code || input.dst_state_code === company.state_code;
+        // Inside the state: CGST + SGST. Outside the state: IGST. A supply to an SEZ or an export is always IGST
+        let is_inter_state_supply = input.gst_treatment === 'SEZ' || input.gst_treatment === 'EXPORT';
+        let same_state = !is_inter_state_supply && (!input.dst_state_code || !company.state_code || input.dst_state_code === company.state_code);
         let state_type = same_state ? 'I' : 'X';
-        let include_tax = !!input.include_tax;
+        // Zero rated (export / SEZ without payment of tax): the rate is kept for the return, but no tax is charged
+        let is_zero_rated = !!input.zero_rated;
+        // Reverse charge purchase: the supplier is paid the taxable value only, the buyer pays the tax to the government
+        let is_reverse_charge = !!input.reverse_charge;
+        let include_tax = !!input.include_tax && !is_zero_rated;
 
         let tax_summary = {};
         let items = input.items.map(item => {
@@ -109,7 +115,7 @@ class Transaction {
             let item_taxes = tax_details.map(detail => ({
                 tax_type_code: detail.tax_type_code,
                 tax_rate: detail.tax_rate,
-                tax_value: UTILS.round2(taxable_amount * detail.tax_rate / 100)
+                tax_value: is_zero_rated ? 0 : UTILS.round2(taxable_amount * detail.tax_rate / 100)
             }));
             item_taxes.forEach(item_tax => {
                 let summary_key = `${item_tax.tax_type_code}_${item_tax.tax_rate}`;
@@ -137,12 +143,13 @@ class Transaction {
                 tax_id: item.tax_id || 0,
                 tax_name: tax ? tax.name : '',
                 taxes: item_taxes,
-                item_total: UTILS.round2(taxable_amount + tax_value),
+                item_total: UTILS.round2(is_reverse_charge ? taxable_amount : taxable_amount + tax_value),
                 loc_id: item.loc_id || 0
             };
         });
 
         let taxable_amount = UTILS.round2(items.reduce((sum, item) => sum + item.taxable_amount, 0));
+        // With reverse charge the tax is not part of the amount of the document (it stays in item.taxes and tax_summary for the ledger and the returns)
         let tot_tax = UTILS.round2(items.reduce((sum, item) => sum + item.item_total - item.taxable_amount, 0));
         let raw_total = UTILS.round2(taxable_amount + tot_tax);
         let tot_amount = input.round_off === false ? raw_total : Math.round(raw_total);
@@ -221,6 +228,11 @@ class Transaction {
             for (const tax_line of trans.tax_summary) {
                 let tax_acc_id = await this.findAccountId(dbobj, c_id, `${tax_line.tax_type_code}${tax_account_suffix}`);
                 add_line(tax_acc_id, value_is_debit ? tax_line.tax_value : 0, value_is_debit ? 0 : tax_line.tax_value, contact_desc);
+                if (trans.reverse_charge) {
+                    // Reverse charge: the buyer owes the same tax to the government, so the credit is matched by a liability
+                    let liability_acc_id = await this.findAccountId(dbobj, c_id, `${tax_line.tax_type_code}_OUT`);
+                    add_line(liability_acc_id, value_is_debit ? 0 : tax_line.tax_value, value_is_debit ? tax_line.tax_value : 0, `${contact_desc} (reverse charge)`);
+                }
             }
             if (trans.round_amount) {
                 let round_acc_id = await this.findAccountId(dbobj, c_id, 'ROUND_OFF');
@@ -323,6 +335,9 @@ class Transaction {
                     qty_in: is_in ? qty : 0,
                     qty_out: is_out ? qty : 0,
                     rate: item.rate,
+                    // Cost per unit of what comes in on a purchase (after discount, without tax, free quantity included). null = a sales return:
+                    // the stock valuation (FIFO / average) then uses the cost the stock had at that time
+                    cost: is_in ? (this.isSalesSide(trans.trans_type) ? null : UTILS.round2(item.taxable_amount / qty)) : undefined,
                     loc_id: item.loc_id || 0
                 };
             });
@@ -361,6 +376,7 @@ class Transaction {
             qty_in: stock_move.qty_in,
             qty_out: stock_move.qty_out,
             rate: stock_move.rate,
+            cost: stock_move.cost, // stock in only (see buildStockMoves)
             loc_id: stock_move.loc_id
         }));
         await dbobj.collection('ob_stock_ledger').insertMany(stock_entries);
@@ -514,10 +530,14 @@ class Transaction {
             }
             let default_rate = is_sales_side ? master_item.sale_rate : master_item.purchase_rate;
             if (price_list) {
-                default_rate = PRICE_LIST.getRate(price_list, master_item.item_id, default_rate);
+                default_rate = PRICE_LIST.getRate(price_list, master_item.item_id, default_rate, input_item.qty);
             }
+            // The discount of a customer is the default discount of every line, unless the line has its own
+            let has_own_discount = input_item.disc_percentage !== undefined || input_item.disc_amount !== undefined;
+            let default_discount = is_sales_side && !has_own_discount && contact && contact.discount ? contact.discount : undefined;
             return {
                 ...input_item,
+                disc_percentage: default_discount !== undefined ? default_discount : input_item.disc_percentage,
                 item_name: input_item.item_name || master_item.name,
                 item_type: master_item.type,
                 hs: input_item.hs || master_item.hs || '',
@@ -539,6 +559,66 @@ class Transaction {
         return account;
     }
 
+    /*
+     * Export / SEZ, zero rated and reverse charge: sets the flags on the document and refuses the combinations that are not possible.
+     * zero_rated: sales to an SEZ or an export without payment of tax. reverse_charge: purchase invoices and returns only.
+     */
+    applyGstFlags(trans, input, company) {
+        let is_sales = this.isSalesSide(trans.trans_type);
+        let is_export_or_sez = trans.gst_treatment === 'EXPORT' || trans.gst_treatment === 'SEZ';
+
+        if (is_sales && is_export_or_sez) {
+            trans.zero_rated = !!input.zero_rated;
+        } else if (input.zero_rated) {
+            throw new BusinessError('"Without payment of tax" is only for sales to an SEZ or an export customer', 'ZERO_RATED_NOT_ALLOWED');
+        }
+        if (trans.gst_treatment === 'EXPORT' && is_sales) {
+            trans.dst_state_code = '96'; // place of supply "Other countries"
+        }
+
+        if (!is_sales) {
+            trans.reverse_charge = !!input.reverse_charge;
+        } else if (input.reverse_charge) {
+            throw new BusinessError('Reverse charge is only for purchases', 'REVERSE_CHARGE_NOT_ALLOWED');
+        }
+    }
+
+    /*
+     * Credit limit of a customer: a sale that makes the customer owe more than the limit is refused (when the contact has "block" on).
+     * What the customer owes now + what this document adds (total - paid now; on an edit, the old document is taken out first).
+     */
+    async checkCreditLimit(dbobj, trans, contact, old_trans) {
+        if (!contact || !(contact.credit_limit > 0) || contact.credit_block === false || !SALES_INVOICE_TYPES.includes(trans.trans_type)) {
+            return;
+        }
+        let added = trans.tot_amount - (trans.inline_paid || 0);
+        if (old_trans) {
+            added -= old_trans.tot_amount - (old_trans.inline_paid || 0);
+        }
+        if (added <= 0) {
+            return;
+        }
+        let balance_map = await REPORT.getAccountBalances(dbobj, trans.c_id, [contact.con_acc_id]);
+        let owed_now = balance_map[contact.con_acc_id] || 0;
+        if (UTILS.round2(owed_now + added) > contact.credit_limit + 0.005) {
+            throw new BusinessError(
+                `Credit limit of ${contact.name} is ${contact.credit_limit}. The customer owes ${UTILS.round2(owed_now)} and this document adds ${UTILS.round2(added)}`,
+                'CREDIT_LIMIT_EXCEEDED');
+        }
+    }
+
+    /* A composition dealer (the supplier, or this company) can not charge GST on its bills */
+    checkTaxAllowed(trans, company) {
+        let is_sales = this.isSalesSide(trans.trans_type);
+        let tax_charged = trans.tax_summary.some(tax_line => tax_line.tax_value > 0);
+        if (!is_sales && trans.gst_treatment === 'COMP' && tax_charged) {
+            throw new BusinessError('The supplier is a composition dealer and can not charge GST. Remove the tax from the items', 'COMPOSITION_SUPPLIER_TAX');
+        }
+        if (is_sales && company.gst_scheme === 'COMPOSITION' && tax_charged) {
+            throw new BusinessError('This company is registered under the composition scheme and can not charge GST. Use items without tax', 'COMPOSITION_COMPANY_TAX');
+        }
+    }
+
     /* Turns the client input into the transaction document (nothing is written here) */
     async buildTransaction(dbobj, company, input, contact, user_email) {
         let trans_type = input.trans_type;
@@ -556,6 +636,9 @@ class Transaction {
             ref_id: input.ref_id || 0,
             ref_trans_type: input.ref_trans_type || '',
             include_tax: !!input.include_tax,
+            gst_treatment: contact && contact.gst_treatment ? contact.gst_treatment : 'REG', // REG, SEZ, EXPORT or COMP (see contact_save)
+            zero_rated: false,
+            reverse_charge: false,
             status: CONFIG.TRANS_STATUS.SENT,
             payments: [],
             inline_paid: 0,
@@ -573,13 +656,18 @@ class Transaction {
                 throw new BusinessError('Add at least one item', 'ITEMS_REQUIRED');
             }
             let items = await this.fillItemDetails(dbobj, company.c_id, trans_type, input.items, contact, trans.trans_date);
+            this.applyGstFlags(trans, input, company);
             let calculated = await this.calculate(dbobj, company, {
                 items: items,
                 dst_state_code: trans.dst_state_code,
                 include_tax: trans.include_tax,
+                gst_treatment: trans.gst_treatment,
+                zero_rated: trans.zero_rated,
+                reverse_charge: trans.reverse_charge,
                 round_off: input.round_off
             });
             Object.assign(trans, calculated);
+            this.checkTaxAllowed(trans, company);
 
             // Amount paid at the time of billing
             if (this.hasLedger(trans_type) && Array.isArray(input.payments)) {
@@ -710,6 +798,7 @@ class Transaction {
         if (this.isOutstandingType(trans.trans_type)) {
             trans.status = this.getPaidStatus(trans.tot_amount, trans.rec_amt);
         }
+        await this.checkCreditLimit(dbobj, trans, contact, old_trans);
 
         let old_effects_removed = false;
         let doc_written = false;

@@ -139,6 +139,8 @@ const SYS_MODULES = [
     ['REC', 'Recurring Invoices', 'C,F'],
     ['EINV', 'E-invoice', 'C,F'],
     ['SAEWB', 'E-way Bill', 'C,F'],
+    ['OIAST', 'Office Assets', 'C,O'],
+    ['OIASG', 'Office Asset Assignments', 'C,O'],
     ['SET', 'Settings', 'C'],
 ];
 
@@ -150,6 +152,7 @@ const DEFAULT_ROLES = [
     { role_code: 'F', role_name: 'Accountant' },
     { role_code: 'K', role_name: 'Storekeeper' },
     { role_code: 'R', role_name: 'Retail' },
+    { role_code: 'O', role_name: 'Office Inventory' },
 ];
 
 // Transaction number series created for every new company [trans_type, prefix, start]

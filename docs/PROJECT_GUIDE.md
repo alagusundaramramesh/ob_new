@@ -373,11 +373,15 @@ Lists accept `page` and `limit` (default 20, maximum 500) and answer `{ status, 
 | | `einvoice_check`, `einvoice_generate`, `einvoice_cancel` | Module `EINV`. `check` lists what is wrong and the JSON that would be sent |
 | | `einvoice_worklist` | `kind`: `einvoice_pending`, `einvoice_done`, `ewb_pending`, `ewb_done` |
 | E-way bill | `ewb_check`, `ewb_generate`, `ewb_cancel`, `ewb_update_vehicle` | Module `SAEWB` |
+| | `ewb_extend`, `ewb_update_transporter` | Module `SAEWB`. Extend only from 8 hours before to 8 hours after the end date |
 | | `transporter_list`, `transporter_save`, `transporter_delete` | Module `SAEWB` |
 | GST returns | `report_gstr1`, `report_gstr3b` | `month` = `"2026-11"`. Answer: `{ period, gstin, json, summary, warnings }` |
+| | `report_gstr2b` | `month` and `gstr2b` (the JSON downloaded from the portal). Answer: `{ summary, rows, warnings }` |
+| | `report_gstr9`, `report_gstr4` | `year` = the year the financial year starts (2026 = 2026-27). Figures, no JSON file |
+| Opening balances | `opening_balance_list`, `opening_balance_save` | Module `ACCHA`. `balance_to_equity: true` puts the difference in Opening Balance Equity |
 | Reports | `report_ledger`, `report_daybook`, `report_trial_balance`, `report_profit_loss`, `report_balance_sheet` | |
 | | `report_sales_register`, `report_purchase_register`, `report_outstanding`, `report_item_sales` | |
-| | `report_stock_summary`, `report_stock_ledger`, `report_gst_summary` | |
+| | `report_stock_summary`, `report_stock_ledger`, `report_gst_summary` | `report_stock_summary` takes `method`: `MASTER` (default), `FIFO` or `AVERAGE` |
 
 Internal (not under `/api`, header `x-api-key`): `GET /ping`, `POST /cron/overdue_invoices`, `POST /cron/recurring_transactions`, `POST /cron/payment_reminders`.
 
@@ -461,10 +465,47 @@ whose e-invoice is not cancelled. All problems are shown together in plain words
 e-way bill is active; *Also delete this document* (the PHP behaviour) is optional. An e-way bill can be cancelled within 24 hours; a document with an active e-way bill can not be edited. Every call is written to `ob_einvoice_log`
 and two clicks can not register the same document twice.
 
-**Not done:** e-invoice for exports, SEZ and reverse charge, dispatch / ship-to details, multiple e-way bills for one invoice (consolidated e-way bill, extend validity, transporter update), the e-way bill distance lookup by PIN code
+**Also done:** extend the validity of an e-way bill and change its transporter (buttons on the document). **Not done:** e-invoice for exports, SEZ, zero rated and reverse charge (refused with a message), dispatch / ship-to details, consolidated e-way bill, the e-way bill distance lookup by PIN code
 (enter the distance or 0 to let the portal calculate it), B2C QR code (dynamic QR), and bulk generation. Fetching the IRP details of a lost answer works only for a duplicate IRN (error 2150).
 
 **Secrets.** The PHP source and its README contain credentials of the TaxPro account (in plain text). They were not copied. Keep the new credentials in `.env` only, never in the repository.
+
+### GSTR-2B reconciliation, GSTR-9 and GSTR-4
+
+**GSTR-2B** (`class.gstr2b.js`, screen *Reports > GSTR-2B reconciliation*). The user uploads the JSON downloaded from the GST portal; nothing is saved. Purchase bills and supplier credit / debit notes
+from the start of the previous month to the end of the chosen month are matched with the portal documents: first by supplier GSTIN and document number (upper case, letters and digits only, no leading zeros;
+the number is read from the *Reference* of the purchase, otherwise the document number), then by supplier GSTIN and equal amounts when the number is written differently. Result per row: `MATCHED`,
+`MISMATCH` (differences of more than Rs. 1 in taxable value or a tax head are listed), `PROBABLE` (same amounts, other number), `NOT_IN_BOOKS`, `NOT_IN_PORTAL`; and the input credit
+of the portal against the books. Supplier credit notes and debit notes both reduce the credit (as in GSTR-3B) and are matched with the credit notes of the portal.
+
+**GSTR-9** (`class.gst_annual.js`) adds up the twelve monthly GSTR-1 and GSTR-3B builds of a financial year and shows the figures for tables 4, 5, 6 and 9 and a month by month list.
+**GSTR-4 / CMP-08** is for a company set to the *composition* scheme (Settings > Company): turnover per quarter x the composition rate (1% by default), half CGST and half SGST, plus the inward supplies.
+Neither makes a JSON file: the figures are typed into the portal. A composition company can not charge GST on its bills, and GSTR-1 / GSTR-3B are refused for it.
+
+### Export, SEZ, zero rated, reverse charge and composition suppliers
+
+A contact has a **GST treatment**: customers `REG` (default), `SEZ`, `EXPORT`; suppliers `REG` or `COMP` (composition dealer). It is copied to the document (`gst_treatment`). Rules in `class.transaction.js`:
+
+- A sale to an SEZ or an export customer is always **IGST**, even inside the state. Exports get place of supply 96 (other countries).
+- `zero_rated: true` (only for SEZ / export customers) charges **no tax** but keeps the rate for the return ("without payment of tax", LUT / bond).
+- `reverse_charge: true` (purchase bills and supplier notes only): the supplier is owed the taxable value only; the tax is posted as input credit **and** as an output liability (same account heads), so the books stay balanced.
+- A composition supplier can not charge tax on a bill, and a composition company can not charge tax on a sale (the save is refused).
+
+In **GSTR-1**: exports are table 6A (`exp`, WPAY / WOPAY), export notes go to the unregistered notes table (EXPWP / EXPWOP), SEZ sales are B2B invoices of type SEWP / SEWOP, and table 13
+(`doc_issue`: first and last number, count and cancelled, per kind of document and number series) is added. In **GSTR-3B**: exports and SEZ are 3.1(b), reverse charge purchases are 3.1(d) and
+the credit is under 4(A)(3), and the tax payable includes them. E-invoice is refused for these documents (not supported yet).
+
+### Credit limit, tags, discounts, price slabs, barcode, stock valuation, opening balances
+
+- **Credit limit** (customers, `credit_limit`, `credit_block`): a sale invoice, retail invoice or debit note that makes the customer owe more than the limit is refused (`CREDIT_LIMIT_EXCEEDED`). The amount paid at billing time is not counted; on an edit the old document is taken out first.
+- **Tags**: up to 10 lower case labels per contact, `contact_list` can filter by `tag`.
+- **Customer discount**: the `discount` % of a customer is the default discount of the lines of its sales documents unless the line has its own discount. The invoice screen follows the same rule until the user types a rate or a discount.
+- **Price list quantity slabs**: a fixed rate can have slabs `{ min_qty, rate }`; the slab with the highest `min_qty` that the quantity reaches wins. The invoice screen changes the rate when the quantity changes (unless the rate was typed).
+- **Barcode**: one per item (unique in the company). The invoice screen has a scan box: Enter adds the item, or adds 1 to its quantity.
+- **Stock valuation**: `MASTER` = quantity x purchase rate of the item (default, as before). `FIFO` takes what goes out from the oldest purchases first; `AVERAGE` is the weighted average cost. New stock entries
+  keep the purchase cost per unit (`cost`: after discount, without tax); a sales return comes in at the cost the stock has at that moment. Opening stock and adjustments come in at their rate. Old entries
+  without `cost` use their `rate`. Stock that goes out when there is none is not valued.
+- **Opening balances**: one screen (*Accounting > Opening Balances*) for all accounts; debit positive, credit negative. The books must not be locked. With the equity option the Opening Balance Equity account takes the difference.
 
 ### Recurring invoices
 
@@ -545,9 +586,9 @@ its posting rule in `buildLedgerLines` and `STOCK_*_TYPES` (`class.transaction.j
 ## 13. Testing
 
 `npm test` in `server/` runs `scripts/smoke_test.js` against a **running server on an empty database**. It signs up a company and checks
-(about 280 checks): tax split (CGST+SGST / IGST), totals, ledger balance, stock after purchase / sale / edit / delete, receipt allocation rules,
+(about 310 checks): tax split (CGST+SGST / IGST), totals, ledger balance, stock after purchase / sale / edit / delete, receipt allocation rules,
 rejected invalid saves (stock and ledger unchanged), trial balance, balance sheet, profit and loss, GST summary, bank balance,
-journal validation, PDF templates and logo, price list rates, recurring invoices, payment reminders (with a local SMTP server that records the mails), GSTR-1 / GSTR-3B, e-invoice and e-way bill (the whole flow with the test provider, and with the TaxPro adapter against a fake IRP) and role permissions.
+journal validation, PDF templates and logo, price list rates, recurring invoices, payment reminders (with a local SMTP server that records the mails), GSTR-1 / GSTR-3B, GSTR-2B reconciliation, export / SEZ / reverse charge / composition, GSTR-9 and GSTR-4, credit limit, tags, discount and price slabs, FIFO and average stock value, opening balances, e-invoice and e-way bill (the whole flow with the test provider, and with the TaxPro adapter against a fake IRP) and role permissions.
 
 Use a throw away database, for example `DB_NAME=outputbooks_test`. The e-invoice checks adapt to the provider in `.env` (`mock`, or `taxpro` with `EINV_TAXPRO_TEST_HOST` pointing to a fake server; this variable only works in sandbox mode and is for tests). The mail checks only run when `SMTP_HOST` is set; point it at a local test SMTP server
 (for example the `smtp-server` package, or MailHog) to run them. Without SMTP the test checks that the app refuses to send and says why.
@@ -560,9 +601,10 @@ multi currency, Tally import / export, workflows ...). Technical limits of the c
 
 - No MongoDB multi document transactions: failures are handled by `rollbackSave`; run MongoDB as a replica set and wrap `save()` in
   a transaction if you need stronger guarantees.
-- Stock valuation uses the purchase rate of the item, not FIFO / average cost.
+- Stock valuation is the purchase rate of the item unless FIFO or average is chosen on the stock summary. The profit and loss and balance sheet still use the closing stock at the item rate.
 - `cors` accepts every origin (`api/middleware/standard.js`): restrict it to the client url in production.
 - The login token lives 15 days and is kept in `localStorage`.
 - The PDF has three fixed templates (no template designer) and one language; amounts are written with "Rs." because the built in PDF font has no rupee sign. The logo must be PNG or JPEG.
 - Recurring invoices copy the template document as it is at run time. The next date is calculated from the previous date, with the month end kept (31 Jan -> 28 Feb).
-- Price lists do not support quantity slabs or per-customer discounts.
+- GSTR-9 and GSTR-4 are figures only (no JSON). Amendments, advances, deemed exports and ECO supplies are not in the returns. Extend validity and transporter change of the TaxPro provider follow the NIC API description and were not run on the real sandbox.
+- Not built yet: serial / batch items, bundles, attributes, item images, units conversion, print designer, SMS / WhatsApp, loyalty points, branches, multi currency.

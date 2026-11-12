@@ -29,6 +29,14 @@ router.post('/', async (req, res) => {
             locked_till: UTILS.toDate(data.locked_till),
             mdy_on: new Date()
         };
+        // Composition scheme: no GST on sales, tax is paid as a percentage of the turnover (GSTR-4). Left as it is when the screen does not send it
+        if (data.gst_scheme !== undefined) {
+            if (!['REGULAR', 'COMPOSITION'].includes(data.gst_scheme)) {
+                return res.send({ status: "E", message: "GST scheme must be REGULAR or COMPOSITION" });
+            }
+            company_changes.gst_scheme = data.gst_scheme;
+            company_changes.composition_rate = Number(data.composition_rate) || 1;
+        }
         await dbobj.collection('ob_companies').updateOne({ c_id: data.c_id }, { $set: company_changes });
         let company = await UTILS.getCompany(dbobj, data.c_id);
         return res.send({ status: "S", message: "Company updated", data: company });

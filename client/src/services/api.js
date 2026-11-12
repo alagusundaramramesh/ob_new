@@ -63,6 +63,8 @@ export const getDashboard = () => callApi("dashboard");
 /* ACCOUNTS */
 export const getAccountGroups = () => callApi("account_group_list");
 export const getAccounts = (filters) => callApi("account_list", filters);
+export const getOpeningBalances = () => callApi("opening_balance_list");
+export const saveOpeningBalances = (formData) => callApi("opening_balance_save", formData);
 export const saveAccount = (formData) => callApi("account_save", formData);
 export const deleteAccount = (acc_id) => callApi("account_delete", { acc_id });
 
@@ -81,6 +83,16 @@ export const adjustStock = (formData) => callApi("stock_adjust", formData);
 export const getCategories = () => callApi("category_list");
 export const saveCategory = (formData) => callApi("category_save", formData);
 export const deleteCategory = (category_id) => callApi("category_delete", { category_id });
+
+/* OFFICE INVENTORY */
+export const getOfficeAssets = (filters) => callApi("office_asset_list", filters);
+export const getOfficeAssetDetails = (asset_id) => callApi("office_asset_details", { asset_id });
+export const saveOfficeAsset = (formData) => callApi("office_asset_save", formData);
+export const deleteOfficeAsset = (asset_id) => callApi("office_asset_delete", { asset_id });
+export const setOfficeAssetStatus = (asset_id, status) => callApi("office_asset_status", { asset_id, status });
+export const assignOfficeAsset = (formData) => callApi("office_asset_assign", formData);
+export const returnOfficeAsset = (formData) => callApi("office_asset_return", formData);
+export const getOfficeAssignments = (filters) => callApi("office_assignment_list", filters);
 
 /* SETTINGS */
 export const getTaxes = () => callApi("tax_list");
@@ -164,6 +176,8 @@ export const checkEwb = (formData) => callApi("ewb_check", formData);
 export const generateEwb = (formData) => callApi("ewb_generate", formData);
 export const cancelEwb = (formData) => callApi("ewb_cancel", formData);
 export const updateEwbVehicle = (formData) => callApi("ewb_update_vehicle", formData);
+export const extendEwb = (formData) => callApi("ewb_extend", formData);
+export const updateEwbTransporter = (formData) => callApi("ewb_update_transporter", formData);
 export const getTransporters = () => callApi("transporter_list");
 export const saveTransporter = (formData) => callApi("transporter_save", formData);
 export const deleteTransporter = (tp_id) => callApi("transporter_delete", { tp_id });

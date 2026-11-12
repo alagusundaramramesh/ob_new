@@ -27,12 +27,41 @@ const JSON_FOLDER = getArg('--from-json');
 
 /* ---------------------------------------------------------------- reading the source */
 
+// phpMyAdmin writes every value as text ("59", "100.00"). The MySQL driver gives real numbers, so JSON rows are converted the same way.
+// These columns hold text that only looks like a number sometimes (item code 123, phone, invoice number), so they stay text.
+const TEXT_COLUMNS = [
+    'name', 'company', 'itemCode', 'SKU', 'HS', 'hsDesc', 'phone', 'zip', 'tNo', 'prefix', 'suffix', 'taxNo', 'taxCode', 'pRef', 'ref',
+    'descr', 'desc', 'saleDesc', 'purchaseDesc', 'printName', 'email', 'address1', 'address2', 'city', 'contactPerson', 'contactPersonMobile',
+    'accCode', 'accCustomCode', 'sName', 'loginName', 'password', 'bankName', 'accName', 'accNumber', 'ifsc', 'stateCode', 'countryCode',
+    'groupCode', 'roleCode', 'roleName', 'tType', 'refTtype', 'status', 'uom', 'currency', 'currencyCode', 'shortName', 'addInfo'
+];
+
+function numbersFromText(row) {
+    let converted = {};
+    for (let [column, value] of Object.entries(row)) {
+        let looksNumeric = typeof value === 'string' && /^-?(0|[1-9]\d{0,14})(\.\d+)?$/.test(value);
+        converted[column] = looksNumeric && !TEXT_COLUMNS.includes(column) ? Number(value) : value;
+    }
+    return converted;
+}
+
 async function openSource() {
+    if (JSON_FOLDER && fs.statSync(JSON_FOLDER).isFile()) {
+        // One file from phpMyAdmin (Export > JSON): [{type: "table", name, data: [rows]}, ...]
+        let tables = {};
+        JSON.parse(fs.readFileSync(JSON_FOLDER, 'utf8'))
+            .filter(entry => entry.type === 'table')
+            .forEach(entry => { tables[entry.name] = (entry.data || []).map(numbersFromText); });
+        return {
+            async rows(table) { return tables[table] || []; },
+            async close() { }
+        };
+    }
     if (JSON_FOLDER) {
         return {
             async rows(table) {
                 let file = path.join(JSON_FOLDER, `${table}.json`);
-                return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
+                return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).map(numbersFromText) : [];
             },
             async close() { }
         };
@@ -181,7 +210,7 @@ async function main() {
         ? source.rows(table).then(rows => forCompany(rows, field))
         : source.rows(table, `WHERE \`${field}\` = ?`, [C_ID]));
 
-    let [company_rows] = [JSON_FOLDER ? (await source.rows('ob_companies')).filter(row => row.id === C_ID) : await source.rows('ob_companies', 'WHERE id = ?', [C_ID])];
+    let [company_rows] = [JSON_FOLDER ? (await source.rows('ob_companies')).filter(row => Number(row.id) === C_ID) : await source.rows('ob_companies', 'WHERE id = ?', [C_ID])];
     if (company_rows.length === 0) {
         throw new Error(`Company ${C_ID} not found in ob_companies`);
     }
@@ -193,8 +222,10 @@ async function main() {
     let users = all_users.filter(user => company_users.some(company_user => company_user.userId === user.id));
     let roles = await q('ob_role');
     let permissions = await q('ob_role_permissions');
+    // PHP role codes -> codes of this app. PHP A (Administrator) is C here (all modules), PHP C (Accountant) is F here. Other codes match.
+    const roleCodeOfThisApp = { A: 'C', C: 'F', S: 'S', I: 'I', R: 'R' };
     write.ob_roles = roles.map(role => ({
-        role_id: role.roleId, c_id: C_ID, role_code: role.roleCode, role_name: role.roleName, is_system: !!role.is_system, stat: 'A',
+        role_id: role.roleId, c_id: C_ID, role_code: roleCodeOfThisApp[role.roleCode] || 'U', role_name: role.roleName, is_system: !!role.is_system, stat: 'A',
         permissions: permissions.filter(permission => permission.roleId === role.roleId && num(permission.actionRights) > 0).map(permission => permission.modCode)
     }));
     write.ob_users = users.map(user => ({
@@ -209,7 +240,9 @@ async function main() {
         opening_balance: num(account.balance), is_system: !!account.systemRec, is_active: !!account.isActive, stat: 'A', crd_on: new Date()
     }));
     let contact_addresses = await q('ob_contacts_address');
-    write.ob_contacts = (await q('ob_contacts')).map(contact => convertContact(contact, contact_addresses.filter(address => address.conId === contact.id)));
+    // csType B is a PHP branch (like "Main Branch"), not a customer or supplier
+    let customers_and_suppliers = (await q('ob_contacts')).filter(contact => contact.csType === 'C' || contact.csType === 'S');
+    write.ob_contacts = customers_and_suppliers.map(contact => convertContact(contact, contact_addresses.filter(address => address.conId === contact.id)));
     write.ob_items = (await q('ob_items')).map(convertItem);
     write.ob_categories = (await q('ob_category')).map(category => ({ category_id: category.id, c_id: C_ID, name: category.name, parent_id: num(category.pId), stat: 'A', crd_on: new Date() }));
 
@@ -291,6 +324,11 @@ async function writeToMongo(write) {
         if (docs.length > 0) {
             await dbobj.collection(collection).insertMany(docs);
         }
+    }
+
+    // PHP keeps the payment modes as shared system rows (cId 0), so a company has none of its own: give it the default ones
+    if (write.ob_payment_modes.length === 0) {
+        await COMPANY_SETUP.createPaymentModes(dbobj, C_ID);
     }
 
     // Contacts without a ledger account get one

@@ -485,6 +485,208 @@ async function main() {
     check('another company does not see these documents', (await call('report_gstr1', { month }, token)).status === 'E');
     check('a month without documents gives empty tables', (await call('report_gstr1', { month: '2020-01' }, gst_token)).data.json.b2b.length === 0);
 
+    console.log('GSTR-2B reconciliation');
+    let portal_doc = (ctin, inum, txval, igst, cgst, sgst) => ({ ctin, trdnm: 'Supplier', inv: [{ inum, typ: 'R', dt: '01-01-2026', val: txval + igst + cgst + sgst, pos: '33', rev: 'N', itcavl: 'Y', txval, igst, cgst, sgst, cess: 0 }] });
+    let gstr2b_file = {
+        data: {
+            gstin: '33AABCG1234D1Z5', rtnprd: month,
+            docdata: {
+                b2b: [
+                    portal_doc('29AABCS1111D1Z3', ` ${purchase_one.data.trans_no.toLowerCase().replace(/[^a-z0-9]/g, '')} `, 320000, 57600, 0, 0),   // same number written differently
+                    portal_doc('33AABCS2222D1Z1', 'SUP/9', 2000, 0, 50, 50),                                                                       // other number, same amounts
+                    portal_doc('27AABCX0000D1Z9', 'X-1', 1000, 0, 90, 90)                                                                            // not in the books
+                ],
+                cdnr: [{ ctin: '29AABCS1111D1Z3', trdnm: 'Supplier', nt: [{ ntnum: purchase_return.data.trans_no, typ: 'C', dt: '01-01-2026', val: 9540, txval: 8000, igst: 1540, cgst: 0, sgst: 0, cess: 0 }] }] // tax differs by 100
+            }
+        }
+    };
+    let rec = await call('report_gstr2b', { month, gstr2b: gstr2b_file }, gst_token);
+    let rec_status = (trans_no) => (rec.data.rows.find(row => row.book && row.book.trans_no === trans_no) || {}).status;
+    check('GSTR-2B reconciliation runs', rec.status === 'S', rec.message);
+    check('same supplier and number is MATCHED even when written differently', rec_status(purchase_one.data.trans_no) === 'MATCHED', rec.data.rows.map(row => row.status));
+    check('same supplier and amounts with another number is PROBABLE', rec_status(purchase_two.data.trans_no) === 'PROBABLE');
+    check('a different amount is a MISMATCH and the difference is shown', rec_status(purchase_return.data.trans_no) === 'MISMATCH' &&
+        rec.data.rows.find(row => row.status === 'MISMATCH').differences.iamt === -100, rec.data.rows.find(row => row.status === 'MISMATCH'));
+    check('a portal document missing in the books is NOT_IN_BOOKS', rec.data.summary.not_in_books === 1 && rec.data.rows.find(row => row.status === 'NOT_IN_BOOKS').portal.ctin === '27AABCX0000D1Z9');
+    check('summary counts', rec.data.summary.matched === 1 && rec.data.summary.probable === 1 && rec.data.summary.mismatch === 1 && rec.data.summary.not_in_portal === 0, rec.data.summary);
+    check('ITC of the portal = invoices minus the credit note (IGST 57600 - 1540, CGST 50 + 90)',
+        rec.data.summary.itc_portal.iamt === 57600 - 1540 && rec.data.summary.itc_portal.camt === 140, rec.data.summary.itc_portal);
+    check('ITC of the books agrees with the 3B input credit (IGST 57600 - 1440, CGST 50)',
+        rec.data.summary.itc_books.iamt === 56160 && rec.data.summary.itc_books.camt === 50, rec.data.summary.itc_books);
+    let rec_empty = await call('report_gstr2b', { month, gstr2b: { data: { docdata: { b2b: [portal_doc('27AABCX0000D1Z9', 'X-1', 1000, 0, 90, 90)] } } } }, gst_token);
+    check('books documents the portal does not have are NOT_IN_PORTAL', rec_empty.data.summary.not_in_portal === 3 && rec_empty.data.summary.matched === 0, rec_empty.data.summary);
+    check('a file that is not GSTR-2B is refused', (await call('report_gstr2b', { month, gstr2b: { hello: 1 } }, gst_token)).status === 'E');
+    check('the file is required', (await call('report_gstr2b', { month }, gst_token)).status === 'E');
+
+    console.log('Export, SEZ, reverse charge, composition, GSTR-9 and GSTR-4');
+    let ex_signup = await call('signup', { name: 'Export Tester', email: `exp_${run_id}@example.com`, password: 'Exp@12345', company_name: 'Export Co', state_code: '33' });
+    let ex_token = ex_signup.token;
+    await call('company_update', { name: 'Export Co', state_code: '33', tax_no: '33AABCE5555D1Z2', allow_negative_stock: true }, ex_token);
+    let ex_taxes = (await call('tax_list', {}, ex_token)).data;
+    let ex_tax_of = (code) => ex_taxes.find(tax => tax.tax_code === code).tax_id;
+    let ex_item = async (name, tax_code) => (await call('item_save', { name, type: 'P', uom: 'Nos', hs: '8471', sale_rate: 1000, purchase_rate: 100, tax_id: ex_tax_of(tax_code), opening_stk: 0 }, ex_token)).item_id;
+    let ex_item_18 = await ex_item('Machine', 'GST18');
+    let ex_item_0 = await ex_item('Grain', 'GST0');
+    let ex_party = async (cs_type, name, state_code, tax_no, gst_treatment) => (await call('contact_save', { cs_type, name, state_code, tax_no, gst_treatment }, ex_token));
+    let abroad = (await ex_party('C', 'Overseas Buyer', '', '', 'EXPORT')).con_id;
+    let sez_buyer = (await ex_party('C', 'SEZ Buyer', '29', '29AABCZ1234D1Z9', 'SEZ')).con_id;
+    let local_buyer = (await ex_party('C', 'Local Buyer', '33', '33AABCL1234D1Z4', 'REG')).con_id;
+    let rcm_supplier = (await ex_party('S', 'Unregistered Supplier', '33', '', 'REG')).con_id;
+    let comp_supplier = (await ex_party('S', 'Composition Supplier', '33', '33AABCK1234D1Z6', 'COMP')).con_id;
+    check('a customer can not be a composition dealer', (await ex_party('C', 'Bad', '33', '', 'COMP')).status === 'E');
+    check('a supplier can not be an SEZ', (await ex_party('S', 'Bad2', '33', '', 'SEZ')).status === 'E');
+    let ex_doc = (trans_type, con_id, items, extra) => call('transaction_save', { trans_type, trans_date: today, con_id, items, ...(extra || {}) }, ex_token);
+
+    let export_paid = await ex_doc('SI', abroad, [{ item_id: ex_item_18, qty: 2, rate: 1000 }]);
+    let export_lut = await ex_doc('SI', abroad, [{ item_id: ex_item_18, qty: 1, rate: 1000 }], { zero_rated: true });
+    let sez_lut = await ex_doc('SI', sez_buyer, [{ item_id: ex_item_18, qty: 1, rate: 500 }], { zero_rated: true });
+    let sez_paid = await ex_doc('SI', sez_buyer, [{ item_id: ex_item_18, qty: 1, rate: 500 }]);
+    check('export with payment of tax charges IGST (360 on 2000)', export_paid.status === 'S' && export_paid.data.tot_amount === 2360, export_paid);
+    check('export without payment of tax charges no tax', export_lut.status === 'S' && export_lut.data.tot_amount === 1000, export_lut);
+    check('SEZ sale without payment is 500, with payment IGST 90 even inside the state', sez_lut.data.tot_amount === 500 && sez_paid.data.tot_amount === 590, [sez_lut, sez_paid]);
+    check('"without payment of tax" is refused for a normal customer', (await ex_doc('SI', local_buyer, [{ item_id: ex_item_18, qty: 1, rate: 100 }], { zero_rated: true })).status === 'E');
+    check('reverse charge is refused on a sale', (await ex_doc('SI', local_buyer, [{ item_id: ex_item_18, qty: 1, rate: 100 }], { reverse_charge: true })).status === 'E');
+    let local_sale = await ex_doc('SI', local_buyer, [{ item_id: ex_item_18, qty: 1, rate: 100 }]);
+    let cancelled_sale = await ex_doc('SI', local_buyer, [{ item_id: ex_item_18, qty: 1, rate: 100 }]);
+    check('a sale can be deleted (cancelled)', (await call('transaction_delete', { trans_id: cancelled_sale.data.trans_id }, ex_token)).status === 'S');
+
+    let rcm_purchase = await ex_doc('PI', rcm_supplier, [{ item_id: ex_item_18, qty: 10, rate: 100 }], { reverse_charge: true });
+    check('reverse charge purchase: the supplier is owed the taxable value only', rcm_purchase.status === 'S' && rcm_purchase.data.tot_amount === 1000, rcm_purchase);
+    check('composition supplier can not charge tax', (await ex_doc('PI', comp_supplier, [{ item_id: ex_item_18, qty: 1, rate: 100 }])).status === 'E');
+    check('composition supplier bill without tax is saved', (await ex_doc('PI', comp_supplier, [{ item_id: ex_item_0, qty: 5, rate: 100 }])).status === 'S');
+    let ex_trial = await call('report_trial_balance', {}, ex_token);
+    check('books stay balanced with reverse charge', ex_trial.status === 'S' && ex_trial.data.is_balanced && Math.abs(ex_trial.data.total_debit - ex_trial.data.total_credit) < 0.01, ex_trial.data);
+
+    let ex_g1 = await call('report_gstr1', { month }, ex_token);
+    let ex_json = ex_g1.data && ex_g1.data.json;
+    check('GSTR-1 of the export company runs', ex_g1.status === 'S', ex_g1.message);
+    let wpay = ex_json.exp.find(group => group.exp_typ === 'WPAY');
+    let wopay = ex_json.exp.find(group => group.exp_typ === 'WOPAY');
+    check('exports with payment are in table 6A (WPAY) with IGST', wpay.inv.length === 1 && wpay.inv[0].itms[0].itm_det.txval === 2000 && wpay.inv[0].itms[0].itm_det.iamt === 360 && wpay.inv[0].itms[0].itm_det.rt === 18, ex_json.exp);
+    check('exports without payment are WOPAY with the rate kept and no tax', wopay.inv.length === 1 && wopay.inv[0].itms[0].itm_det.iamt === 0 && wopay.inv[0].itms[0].itm_det.rt === 18 && wopay.inv[0].itms[0].itm_det.txval === 1000, ex_json.exp);
+    let sez_group = ex_json.b2b.find(party => party.ctin === '29AABCZ1234D1Z9');
+    check('SEZ invoices are in B2B with type SEWP / SEWOP', !!sez_group && sez_group.inv.length === 2 && sez_group.inv.some(inv => inv.inv_typ === 'SEWP') && sez_group.inv.some(inv => inv.inv_typ === 'SEWOP') && sez_group.inv[0].pos === '29', sez_group);
+    check('the export is not reported in the nil table', ex_json.nil.inv.length === 0, ex_json.nil);
+    check('summary shows exports and SEZ', ex_g1.data.summary.exp.count === 2 && ex_g1.data.summary.exp.txval === 3000 && ex_g1.data.summary.sez.count === 2 && ex_g1.data.summary.sez.txval === 1000, ex_g1.data.summary);
+    let issued = ex_json.doc_issue.doc_det.find(nature => nature.doc_num === 1);
+    check('document issue table: 6 invoices, 1 cancelled', !!issued && issued.docs.length === 1 && issued.docs[0].totnum === 6 && issued.docs[0].cancel === 1 && issued.docs[0].net_issue === 5 &&
+        issued.docs[0].from === export_paid.data.trans_no && issued.docs[0].to === cancelled_sale.data.trans_no, issued);
+
+    let ex_g3 = await call('report_gstr3b', { month }, ex_token);
+    let ex_3b = ex_g3.data.json;
+    check('3B: exports and SEZ in the zero rated table (3.1 b) with the IGST paid', ex_3b.sup_details.osup_zero.txval === 4000 && ex_3b.sup_details.osup_zero.iamt === 450, ex_3b.sup_details.osup_zero);
+    check('3B: reverse charge purchase in 3.1 d and credit under ISRC', ex_3b.sup_details.isup_rev.txval === 1000 && ex_3b.sup_details.isup_rev.camt === 90 && ex_3b.sup_details.isup_rev.samt === 90 &&
+        ex_3b.itc_elg.itc_avl.find(row => row.ty === 'ISRC').camt === 90, [ex_3b.sup_details.isup_rev, ex_3b.itc_elg.itc_avl]);
+    check('3B: composition supplier purchase is in the nil / exempt inward table', ex_3b.inward_sup.isup_details.find(row => row.ty === 'GST').intra === 500, ex_3b.inward_sup);
+    check('3B: payable = export IGST 450, the reverse charge tax is paid and taken as credit, plus the local sale (CGST / SGST 9 each)',
+        ex_g3.data.summary.payable.iamt === 450 && ex_g3.data.summary.payable.camt === 9 && ex_g3.data.summary.payable.samt === 9, ex_g3.data.summary.payable);
+
+    let fy_year = Number(today.slice(5, 7)) >= 4 ? Number(today.slice(0, 4)) : Number(today.slice(0, 4)) - 1;
+    let g9 = await call('report_gstr9', { year: fy_year }, ex_token);
+    check('GSTR-9 adds up the twelve months', g9.status === 'S' && g9.data.months.length === 12 && g9.data.tables['4C'].txval === 3000 && g9.data.tables['4D'].txval === 1000 &&
+        g9.data.tables['4B'].txval === 100 && g9.data.tables['9'].iamt === 450 && g9.data.tables['6_rcm'].camt === 90, g9.data && g9.data.tables);
+    check('GSTR-9 needs a year', (await call('report_gstr9', {}, ex_token)).status === 'E');
+    check('GSTR-4 is only for composition companies', (await call('report_gstr4', { year: fy_year }, ex_token)).status === 'E');
+
+    // Composition company
+    let cp_signup = await call('signup', { name: 'Comp Tester', email: `cmp_${run_id}@example.com`, password: 'Cmp@12345', company_name: 'Comp Co', state_code: '33' });
+    let cp_token = cp_signup.token;
+    check('company can be set to the composition scheme', (await call('company_update', { name: 'Comp Co', state_code: '33', tax_no: '33AABCC9999D1Z8', gst_scheme: 'COMPOSITION', composition_rate: 1 }, cp_token)).status === 'S');
+    check('an unknown scheme is refused', (await call('company_update', { name: 'Comp Co', state_code: '33', gst_scheme: 'OTHER' }, cp_token)).status === 'E');
+    let cp_taxes = (await call('tax_list', {}, cp_token)).data;
+    let cp_item = async (tax_code) => (await call('item_save', { name: `Goods ${tax_code}`, type: 'P', uom: 'Nos', hs: '1006', sale_rate: 100, purchase_rate: 50, tax_id: cp_taxes.find(tax => tax.tax_code === tax_code).tax_id, opening_stk: 0 }, cp_token)).item_id;
+    let cp_taxed = await cp_item('GST18');
+    let cp_free = await cp_item('GST0');
+    let cp_buyer = (await call('contact_save', { cs_type: 'C', name: 'Walk In', state_code: '33' }, cp_token)).con_id;
+    check('a composition company can not charge GST', (await call('transaction_save', { trans_type: 'SI', trans_date: today, con_id: cp_buyer, items: [{ item_id: cp_taxed, qty: 1, rate: 100 }] }, cp_token)).status === 'E');
+    check('a composition company bills without tax', (await call('transaction_save', { trans_type: 'SI', trans_date: today, con_id: cp_buyer, items: [{ item_id: cp_free, qty: 10, rate: 100 }] }, cp_token)).status === 'S');
+    check('GSTR-1 and GSTR-3B are refused for a composition company', (await call('report_gstr1', { month }, cp_token)).status === 'E' && (await call('report_gstr3b', { month }, cp_token)).status === 'E');
+    let g4 = await call('report_gstr4', { year: fy_year }, cp_token);
+    check('GSTR-4: turnover 1000, tax 1% = 10 (CGST 5 + SGST 5)', g4.status === 'S' && g4.data.totals.turnover === 1000 && g4.data.totals.tax === 10 && g4.data.totals.cgst === 5 && g4.data.totals.sgst === 5 && g4.data.quarters.length === 4, g4.data);
+
+    console.log('Credit limit, tags, discount, price slabs, opening balances, stock valuation, barcode');
+    let p3_signup = await call('signup', { name: 'Phase3 Tester', email: `p3_${run_id}@example.com`, password: 'P3@12345', company_name: 'Phase3 Co', state_code: '33' });
+    let p3_token = p3_signup.token;
+    await call('company_update', { name: 'Phase3 Co', state_code: '33', tax_no: '33AABCP3333D1Z7', allow_negative_stock: true }, p3_token);
+    let p3_taxes = (await call('tax_list', {}, p3_token)).data;
+    let p3_no_tax = p3_taxes.find(tax => tax.tax_code === 'GST0').tax_id;
+    let p3_item = async (name, type, extra) => call('item_save', { name, type, uom: 'Nos', hs: '8471', sale_rate: 200, purchase_rate: 100, tax_id: p3_no_tax, opening_stk: 0, ...(extra || {}) }, p3_token);
+    let p3_widget = await p3_item('Widget', 'P', { barcode: 'BC-1' });
+    let p3_service = await p3_item('Consulting', 'S');
+    check('items saved', p3_widget.status === 'S' && p3_service.status === 'S', [p3_widget, p3_service]);
+    check('a barcode belongs to one item only', (await p3_item('Widget Two', 'P', { barcode: 'BC-1' })).status === 'E');
+    check('the item list finds an item by barcode', (await call('item_list', { search: 'BC-1' }, p3_token)).data.some(item => item.item_id === p3_widget.item_id));
+    let p3_party = async (cs_type, name, extra) => call('contact_save', { cs_type, name, state_code: '33', ...(extra || {}) }, p3_token);
+    let p3_doc = (trans_type, con_id, items, extra) => call('transaction_save', { trans_type, trans_date: today, con_id, items, ...(extra || {}) }, p3_token);
+
+    // credit limit
+    let p3_limited = await p3_party('C', 'Limited Buyer', { credit_limit: 1000 });
+    check('a negative credit limit is refused', (await p3_party('C', 'Negative Limit', { credit_limit: -5 })).status === 'E');
+    check('a sale inside the credit limit is saved', (await p3_doc('SI', p3_limited.con_id, [{ item_id: p3_service.item_id, qty: 3, rate: 200 }])).status === 'S');
+    let over_limit = await p3_doc('SI', p3_limited.con_id, [{ item_id: p3_service.item_id, qty: 2.5, rate: 200 }]);
+    check('a sale above the credit limit is refused', over_limit.status === 'E' && over_limit.code === 'CREDIT_LIMIT_EXCEEDED', over_limit);
+    check('a sale paid at once does not use the credit limit', (await call('transaction_save', { trans_type: 'SI', trans_date: today, con_id: p3_limited.con_id, items: [{ item_id: p3_service.item_id, qty: 2.5, rate: 200 }],
+        payments: [{ acc_id: (await call('payment_mode_list', {}, p3_token)).accounts[0].acc_id, amount: 500 }] }, p3_token)).status === 'S');
+    await p3_party('C', 'Limited Buyer', { con_id: p3_limited.con_id, credit_limit: 1000, credit_block: false });
+    check('with block off the limit is not enforced', (await p3_doc('SI', p3_limited.con_id, [{ item_id: p3_service.item_id, qty: 5, rate: 200 }])).status === 'S');
+
+    // tags
+    let tagged = await p3_party('C', 'Tagged Buyer', { tags: ['Wholesale ', 'north', 'wholesale'] });
+    check('tags are cleaned: lower case, no duplicates', tagged.status === 'S' && (await call('contact_list', { cs_type: 'C', tag: 'WHOLESALE' }, p3_token)).data[0].tags.join() === 'wholesale,north');
+    check('contacts can be listed by tag', (await call('contact_list', { cs_type: 'C', tag: 'north' }, p3_token)).data.length === 1 && (await call('contact_list', { cs_type: 'C', tag: 'south' }, p3_token)).data.length === 0);
+    check('more than 10 tags are refused', (await p3_party('C', 'Many Tags', { tags: Array.from({ length: 11 }, (_, index) => `tag${index}`) })).status === 'E');
+
+    // customer discount and quantity slabs
+    let discount_buyer = await p3_party('C', 'Discount Buyer', { discount: 10 });
+    let discounted = await p3_doc('SI', discount_buyer.con_id, [{ item_id: p3_service.item_id, qty: 10, rate: 200 }]);
+    check('the customer discount is the default discount of the line (10% of 2000)', discounted.status === 'S' && discounted.data.tot_amount === 1800, discounted);
+    let own_discount = await p3_doc('SI', discount_buyer.con_id, [{ item_id: p3_service.item_id, qty: 10, rate: 200, disc_percentage: 0 }]);
+    check('a line with its own discount keeps it', own_discount.data.tot_amount === 2000, own_discount);
+
+    let slab_list = await call('price_list_save', { name: 'Volume', list_type: 'S', adjust_percent: 0, rates: [{ item_id: p3_service.item_id, rate: 190, slabs: [{ min_qty: 100, rate: 150 }, { min_qty: 10, rate: 180 }] }] }, p3_token);
+    check('price list with quantity slabs saved', slab_list.status === 'S', slab_list);
+    check('a slab with quantity 0 is refused', (await call('price_list_save', { name: 'Bad slab', list_type: 'S', rates: [{ item_id: p3_service.item_id, rate: 190, slabs: [{ min_qty: 0, rate: 1 }] }] }, p3_token)).status === 'E');
+    check('two slabs with the same quantity are refused', (await call('price_list_save', { name: 'Same slab', list_type: 'S', rates: [{ item_id: p3_service.item_id, rate: 190, slabs: [{ min_qty: 5, rate: 1 }, { min_qty: 5, rate: 2 }] }] }, p3_token)).status === 'E');
+    let slab_buyer = await p3_party('C', 'Slab Buyer', { price_list_id: slab_list.price_list_id });
+    let slab_total = async (qty) => (await p3_doc('SI', slab_buyer.con_id, [{ item_id: p3_service.item_id, qty }])).data.tot_amount;
+    check('below the first slab the fixed rate is used (5 x 190)', await slab_total(5) === 950);
+    check('quantity 10 reaches the first slab (10 x 180)', await slab_total(10) === 1800);
+    check('quantity 99 is still in the first slab (99 x 180)', await slab_total(99) === 17820);
+    check('quantity 120 reaches the second slab (120 x 150)', await slab_total(120) === 18000);
+
+    // stock valuation
+    let p3_supplier = (await p3_party('S', 'Widget Supplier')).con_id;
+    let p3_customer = (await p3_party('C', 'Widget Customer')).con_id;
+    await p3_doc('PI', p3_supplier, [{ item_id: p3_widget.item_id, qty: 10, rate: 100 }]);
+    await p3_doc('PI', p3_supplier, [{ item_id: p3_widget.item_id, qty: 10, rate: 120 }]);
+    await p3_doc('SI', p3_customer, [{ item_id: p3_widget.item_id, qty: 15, rate: 200 }]);
+    let stock_value = async (method) => (await call('report_stock_summary', { method }, p3_token)).data.total_value;
+    check('stock value with the master rate: 5 x 100', await stock_value('MASTER') === 500);
+    check('stock value FIFO: the 5 left are from the newest purchase (5 x 120)', await stock_value('FIFO') === 600);
+    check('stock value by average cost: 5 x 110', await stock_value('AVERAGE') === 550);
+    check('the default method is the master rate', await stock_value(undefined) === 500);
+    check('an unknown method is refused', (await call('report_stock_summary', { method: 'LIFO' }, p3_token)).status === 'E');
+    await p3_doc('SC', p3_customer, [{ item_id: p3_widget.item_id, qty: 2, rate: 200 }]);
+    check('a sales return comes in at the cost of the stock, not at the selling price (FIFO 7 x 120, average 7 x 110)', await stock_value('FIFO') === 840 && await stock_value('AVERAGE') === 770);
+    let fifo_rows = (await call('report_stock_summary', { method: 'FIFO' }, p3_token)).data.rows;
+    check('the rate of a row is the value divided by the quantity', fifo_rows.find(row => row.item_id === p3_widget.item_id).rate === 120);
+
+    // opening balances
+    let opening_list = await call('opening_balance_list', {}, p3_token);
+    let cash_row = opening_list.data.rows.find(row => row.name === 'Cash');
+    check('opening balance list has every account', opening_list.status === 'S' && !!cash_row && opening_list.data.rows.some(row => row.is_equity_account), opening_list.message);
+    check('opening balances need a list', (await call('opening_balance_save', { balances: [] }, p3_token)).status === 'E');
+    check('an unknown account is refused', (await call('opening_balance_save', { balances: [{ acc_id: 99999999, opening_balance: 5 }] }, p3_token)).status === 'E');
+    check('a balance must be a number', (await call('opening_balance_save', { balances: [{ acc_id: cash_row.acc_id, opening_balance: 'abc' }] }, p3_token)).status === 'E');
+    let unbalanced = await call('opening_balance_save', { balances: [{ acc_id: cash_row.acc_id, opening_balance: 25000 }] }, p3_token);
+    check('without the equity entry the difference is told', unbalanced.status === 'S' && unbalanced.difference === 25000 && unbalanced.message.includes('25000'), unbalanced);
+    let balanced = await call('opening_balance_save', { balances: [{ acc_id: cash_row.acc_id, opening_balance: 25000 }], balance_to_equity: true }, p3_token);
+    check('with balance_to_equity the opening balance equity takes the other side', balanced.status === 'S' && balanced.difference === 0, balanced);
+    let opening_after = await call('opening_balance_list', {}, p3_token);
+    check('debit and credit of the openings are equal (25000)', opening_after.data.total_debit === 25000 && opening_after.data.total_credit === 25000 && opening_after.data.difference === 0, opening_after.data);
+    let p3_trial = await call('report_trial_balance', {}, p3_token);
+    check('the trial balance stays balanced', p3_trial.data.is_balanced && p3_trial.data.opening_difference === 0, p3_trial.data);
+
     console.log('E-invoice and e-way bill');
     let crypto = require('crypto');
     let { MongoClient } = require('mongodb');
@@ -625,6 +827,26 @@ async function main() {
     check('vehicle updated', (await einv('ewb_update_vehicle', { trans_id: einv_doc.trans_id, vehicle_no: 'TN10CD5678', from_place: 'Chennai', from_state: '33', reason_code: 1, reason_remark: 'Breakdown' })).status === 'S');
     let doc_after_vehicle = await get_doc(einv_doc.trans_id);
     check('the new vehicle and the history are saved', doc_after_vehicle.ewb.vehicle_no === 'TN10CD5678' && doc_after_vehicle.ewb.vehicle_history.length === 1, doc_after_vehicle.ewb);
+
+    // ---- extend the validity and change the transporter (the fake IRP of the taxpro run does not have these two actions)
+    if (provider_name === 'mock') {
+        let extend_input = { trans_id: einv_doc.trans_id, vehicle_no: 'TN10CD5678', from_place: 'Salem', from_state: '33', from_pincode: '636001', remaining_distance: 450, reason_code: 5, reason_remark: 'Road block' };
+        check('validity can not be extended long before it ends', (await einv('ewb_extend', extend_input)).code === 'EXTEND_WINDOW');
+        let two_hours_left = new Date(Date.now() + 2 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+        await poke_transactions.updateOne({ trans_id: einv_doc.trans_id }, { $set: { 'ewb.valid_till': two_hours_left } });
+        check('extend needs the PIN code of the place', (await einv('ewb_extend', { ...extend_input, from_pincode: '' })).code === 'PLACE_REQUIRED');
+        check('extend needs the remaining distance', (await einv('ewb_extend', { ...extend_input, remaining_distance: 0 })).code === 'DISTANCE_INVALID');
+        check('extend needs a reason', (await einv('ewb_extend', { ...extend_input, reason_code: 9 })).code === 'REASON_REQUIRED');
+        check('validity extended 1 day per 200 km (450 km = 3 days)', (await einv('ewb_extend', extend_input)).status === 'S');
+        let doc_after_extend = await get_doc(einv_doc.trans_id);
+        check('the new end date and the history are saved', doc_after_extend.ewb.valid_till > two_hours_left && doc_after_extend.ewb.extend_history.length === 1 && doc_after_extend.ewb.extend_history[0].old_valid_till === two_hours_left, doc_after_extend.ewb);
+        check('transporter update needs a valid GSTIN', (await einv('ewb_update_transporter', { trans_id: einv_doc.trans_id, transporter_gstin: '123' })).code === 'TRANSPORTER_INVALID');
+        check('transporter updated', (await einv('ewb_update_transporter', { trans_id: einv_doc.trans_id, transporter_gstin: '33AABCT7777D1Z4', transporter_name: 'New Cargo' })).status === 'S');
+        let doc_after_transporter = await get_doc(einv_doc.trans_id);
+        check('the new transporter and the history are saved', doc_after_transporter.ewb.transporter_gstin === '33AABCT7777D1Z4' && doc_after_transporter.ewb.transporter_history.length === 1, doc_after_transporter.ewb);
+        check('the same transporter again is refused', (await einv('ewb_update_transporter', { trans_id: einv_doc.trans_id, transporter_gstin: '33AABCT7777D1Z4' })).code === 'TRANSPORTER_SAME');
+        check('a document without an e-way bill can not be extended', (await einv('ewb_extend', { ...extend_input, trans_id: sales_docs[2].data.trans_id })).code === 'EWB_NOT_ACTIVE');
+    }
     check('e-way bill cancel needs a reason', (await einv('ewb_cancel', { trans_id: einv_doc.trans_id, reason: 9 })).status === 'E');
     check('e-way bill cancelled', (await einv('ewb_cancel', { trans_id: einv_doc.trans_id, reason: 2, remark: 'Order cancelled' })).status === 'S');
     check('a cancelled e-way bill can not be cancelled again', (await einv('ewb_cancel', { trans_id: einv_doc.trans_id, reason: 2 })).status === 'E');

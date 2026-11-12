@@ -32,7 +32,29 @@ router.post('/', async (req, res) => {
             }
         }
 
+        // REG regular, SEZ and EXPORT for customers, COMP (composition dealer) for suppliers
+        let gst_treatment = data.gst_treatment || 'REG';
+        let allowed_treatments = data.cs_type === 'C' ? ['REG', 'SEZ', 'EXPORT'] : ['REG', 'COMP'];
+        if (!allowed_treatments.includes(gst_treatment)) {
+            return res.send({ status: "E", message: `GST treatment ${gst_treatment} is not allowed for this type of contact` });
+        }
+
+        // Credit limit (customers): 0 = no limit. With "block" on, a sale above the limit is refused
+        let credit_limit = Number(data.credit_limit) || 0;
+        if (credit_limit < 0) {
+            return res.send({ status: "E", message: "Credit limit can not be negative" });
+        }
+        // Tags: short labels to group contacts (for example "wholesale", "north")
+        let tags = [...new Set((Array.isArray(data.tags) ? data.tags : []).map(tag => String(tag).trim().toLowerCase()).filter(tag => tag))];
+        if (tags.length > 10 || tags.some(tag => tag.length > 30)) {
+            return res.send({ status: "E", message: "Use up to 10 tags of up to 30 characters" });
+        }
+
         let contact_fields = {
+            credit_limit: credit_limit,
+            credit_block: data.credit_block !== false,
+            tags: tags,
+            gst_treatment: gst_treatment,
             price_list_id: price_list_id,
             reminders_off: !!data.reminders_off,
             name: data.name,

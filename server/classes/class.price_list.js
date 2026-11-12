@@ -23,10 +23,17 @@ class PriceList {
         return true;
     }
 
-    /* Rate of one item: the fixed rate of the list, otherwise the master rate with the percent change */
-    getRate(price_list, item_id, base_rate) {
+    /*
+     * Rate of one item: the fixed rate of the list (a quantity slab when the quantity reaches one: the slab with the highest "min_qty"
+     * that is not more than the quantity), otherwise the master rate with the percent change
+     */
+    getRate(price_list, item_id, base_rate, qty) {
         let fixed_rate = (price_list.rates || []).find(price_item => price_item.item_id === item_id);
         if (fixed_rate) {
+            let reached_slabs = (fixed_rate.slabs || []).filter(slab => (Number(qty) || 0) >= slab.min_qty);
+            if (reached_slabs.length > 0) {
+                return UTILS.round2(reached_slabs.reduce((best, slab) => (slab.min_qty > best.min_qty ? slab : best)).rate);
+            }
             return UTILS.round2(fixed_rate.rate);
         }
         return UTILS.round2(base_rate * (1 + (price_list.adjust_percent || 0) / 100));

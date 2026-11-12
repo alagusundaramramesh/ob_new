@@ -94,6 +94,17 @@ class EinvoiceMock {
     async updateVehicle(context, request) {
         return { vehicle_updated_on: this.dateTimeText(new Date()), valid_till: request.valid_till };
     }
+
+    /* Validity is counted from the later of now and the old end date, 1 day per 200 km still to travel */
+    async extendValidity(context, request) {
+        let old_end = new Date(request.valid_till.replace(' ', 'T') + 'Z');
+        let start = old_end.getTime() > Date.now() ? old_end : new Date();
+        return { updated_on: this.dateTimeText(new Date()), valid_till: this.getValidTill(start, request.body.remainingDistance) };
+    }
+
+    async updateTransporter(context, request) {
+        return { updated_on: this.dateTimeText(new Date()), transporter_id: request.body.transporterId };
+    }
 }
 
 module.exports = new EinvoiceMock();
